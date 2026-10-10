@@ -169,6 +169,19 @@
   .report-row .v { font-variant-numeric: tabular-nums; white-space: nowrap; }
   .report-total { display: flex; justify-content: space-between; padding: 10px 2px 2px; margin-top: 4px; border-top: 2px solid var(--ink); font-weight: 700; font-size: 16px; }
   .report-head { font-size: 16px; font-weight: 700; margin: 0 0 6px; }
+  .ledger-card { padding: 0; overflow: hidden; }
+  .ledger { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 14px; }
+  .ledger th { background: var(--accent); color: #fff; font-weight: 700; padding: 9px 6px; text-align: center; }
+  .ledger th:first-child { width: 36%; }
+  .ledger td { padding: 9px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .ledger td:first-child { padding-left: 12px; word-break: break-all; }
+  .ledger td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ledger td.n:last-child { padding-right: 12px; }
+  .ledger td + td { border-left: 1px solid var(--border); }
+  .ledger tr.sec td { background: var(--accent-soft); color: var(--accent); font-weight: 700; padding: 6px 12px; border-left: none; }
+  .ledger tr.sub td { font-weight: 700; color: var(--ink-muted); }
+  .ledger tr.key td { font-weight: 700; }
+  .ledger tr.total td { font-weight: 800; font-size: 15px; border-top: 2px solid var(--ink); border-bottom: none; }
   .result-box { text-align: center; padding: 18px 10px; }
   .result-box .cap { font-size: 14px; color: var(--ink-muted); }
   .result-box .num { font-size: 32px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
@@ -748,6 +761,19 @@
     bindDelete();
   }
 
+  // 帳票の表: 左=勘定科目、真ん中=貸方、右=借方
+  // rows: { sec } で区切り行、{ name, credit, debit, cls } で明細行
+  function ledgerHtml(rows) {
+    const cell = (v, cls) => `<td class="n${cls ? ' ' + cls : ''}">${v === undefined || v === null ? '' : yen(v)}</td>`;
+    return `<div class="card ledger-card"><table class="ledger">
+      <thead><tr><th>勘定科目</th><th>貸方</th><th>借方</th></tr></thead>
+      <tbody>${rows.map(r => r.sec !== undefined
+        ? `<tr class="sec"><td colspan="3">${esc(r.sec)}</td></tr>`
+        : `<tr class="${r.cls || ''}"><td>${esc(r.name)}</td>${cell(r.credit, r.credit < 0 ? 'minus' : r.creditCls)}${cell(r.debit, r.debit < 0 ? 'minus' : r.debitCls)}</tr>`
+      ).join('')}</tbody>
+    </table></div>`;
+  }
+
   // ---------- 損益計算書 ----------
   function renderPL() {
     const s = ui.pl;
@@ -768,7 +794,19 @@
     const inc = rows('income', -1), exp = rows('expense', 1);
     const incTotal = inc.reduce((x, r) => x + r.v, 0), expTotal = exp.reduce((x, r) => x + r.v, 0);
     const net = incTotal - expTotal;
-    const list = (rs) => rs.length ? rs.map(r => `<div class="report-row"><span>${esc(r.name)}</span><span class="v">${yen(r.v)}</span></div>`).join('') : '<div class="empty">なし</div>';
+    const table = ledgerHtml([
+      { sec: '収益' },
+      ...inc.map(r => ({ name: r.name, credit: r.v })),
+      { name: '収益合計', credit: incTotal, cls: 'sub' },
+      { sec: '費用' },
+      ...exp.map(r => ({ name: r.name, debit: r.v })),
+      { name: '費用合計', debit: expTotal, cls: 'sub' },
+      { sec: '' },
+      net >= 0
+        ? { name: '当期純利益', debit: net, debitCls: 'plus', cls: 'key' }
+        : { name: '当期純損失', credit: -net, creditCls: 'minus', cls: 'key' },
+      { name: '合計', credit: incTotal + Math.max(-net, 0), debit: expTotal + Math.max(net, 0), cls: 'total' }
+    ]);
 
     mainEl.innerHTML = `
       <div class="screen-title">損益計算書</div>
@@ -785,16 +823,7 @@
         <div class="cap">${net >= 0 ? '当期純利益(黒字)' : '当期純損失(赤字)'}</div>
         <div class="num ${net >= 0 ? 'plus' : 'minus'}">${yen(net)}</div>
       </div>
-      <div class="card">
-        <div class="report-head">収益</div>
-        ${list(inc)}
-        <div class="report-total"><span>収益合計</span><span class="plus">${yen(incTotal)}</span></div>
-      </div>
-      <div class="card">
-        <div class="report-head">費用</div>
-        ${list(exp)}
-        <div class="report-total"><span>費用合計</span><span class="minus">${yen(expTotal)}</span></div>
-      </div>
+      ${table}
       <p class="note">※ 現金からの預け入れ・引き出しやカードの引き落としは、お金の置き場所が変わるだけなので損益には入りません。</p>`;
 
     $('plMonth').onclick = () => { s.mode = 'month'; render(); };
@@ -821,7 +850,19 @@
     accountsOf('expense').forEach(a => profit -= (m[a.name] || 0));
     const total = (rs) => rs.reduce((x, r) => x + r.v, 0);
     const aT = total(assets), lT = total(liabs), eT = total(equity) + profit;
-    const list = (rs) => rs.length ? rs.map(r => `<div class="report-row"><span>${esc(r.name)}</span><span class="v${r.v < 0 ? ' minus' : ''}">${yen(r.v)}</span></div>`).join('') : '<div class="empty">なし</div>';
+    const table = ledgerHtml([
+      { sec: '資産' },
+      ...assets.map(r => ({ name: r.name, debit: r.v })),
+      { name: '資産合計', debit: aT, cls: 'sub' },
+      { sec: '負債' },
+      ...liabs.map(r => ({ name: r.name, credit: r.v })),
+      { name: '負債合計', credit: lT, cls: 'sub' },
+      { sec: '純資産' },
+      ...equity.map(r => ({ name: r.name, credit: r.v })),
+      { name: 'これまでの損益の累計', credit: profit },
+      { name: '純資産合計', credit: eT, cls: 'sub' },
+      { name: '合計', credit: lT + eT, debit: aT, cls: 'total' }
+    ]);
 
     mainEl.innerHTML = `
       <div class="screen-title">貸借対照表</div>
@@ -833,26 +874,7 @@
         <div class="cap">純資産(資産 − 負債)</div>
         <div class="num ${aT - lT >= 0 ? 'plus' : 'minus'}">${yen(aT - lT)}</div>
       </div>
-      <div class="card">
-        <div class="report-head">資産</div>
-        ${list(assets)}
-        <div class="report-total"><span>資産合計</span><span>${yen(aT)}</span></div>
-      </div>
-      <div class="card">
-        <div class="report-head">負債</div>
-        ${list(liabs)}
-        <div class="report-total"><span>負債合計</span><span>${yen(lT)}</span></div>
-      </div>
-      <div class="card">
-        <div class="report-head">純資産</div>
-        ${list(equity)}
-        <div class="report-row"><span>これまでの損益の累計</span><span class="v${profit < 0 ? ' minus' : ''}">${yen(profit)}</span></div>
-        <div class="report-total"><span>純資産合計</span><span>${yen(eT)}</span></div>
-      </div>
-      <div class="card">
-        <div class="report-row"><span>負債・純資産合計</span><span class="v">${yen(lT + eT)}</span></div>
-        <div class="report-row"><span>資産合計</span><span class="v">${yen(aT)}</span></div>
-      </div>
+      ${table}
       <p class="note">※ アプリを使い始めた時点の現金・預金・カード残高は、設定の「開始残高」で入力すると正しい金額になります。</p>`;
 
     $('bsDate').onchange = (e) => { s.date = e.target.value || today(); render(); };
