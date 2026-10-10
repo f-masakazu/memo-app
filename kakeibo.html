@@ -761,15 +761,17 @@
     bindDelete();
   }
 
-  // 帳票の表: 左=勘定科目、真ん中=貸方、右=借方
+  // 帳票の表: 左=勘定科目、真ん中・右=貸方/借方(debitFirst なら 借方→貸方 の順)
   // rows: { sec } で区切り行、{ name, credit, debit, cls } で明細行
-  function ledgerHtml(rows) {
+  function ledgerHtml(rows, debitFirst) {
     const cell = (v, cls) => `<td class="n${cls ? ' ' + cls : ''}">${v === undefined || v === null ? '' : yen(v)}</td>`;
+    const credit = (r) => cell(r.credit, r.credit < 0 ? 'minus' : r.creditCls);
+    const debit = (r) => cell(r.debit, r.debit < 0 ? 'minus' : r.debitCls);
     return `<div class="card ledger-card"><table class="ledger">
-      <thead><tr><th>勘定科目</th><th>貸方</th><th>借方</th></tr></thead>
+      <thead><tr><th>勘定科目</th>${debitFirst ? '<th>借方</th><th>貸方</th>' : '<th>貸方</th><th>借方</th>'}</tr></thead>
       <tbody>${rows.map(r => r.sec !== undefined
         ? `<tr class="sec"><td colspan="3">${esc(r.sec)}</td></tr>`
-        : `<tr class="${r.cls || ''}"><td>${esc(r.name)}</td>${cell(r.credit, r.credit < 0 ? 'minus' : r.creditCls)}${cell(r.debit, r.debit < 0 ? 'minus' : r.debitCls)}</tr>`
+        : `<tr class="${r.cls || ''}"><td>${esc(r.name)}</td>${debitFirst ? debit(r) + credit(r) : credit(r) + debit(r)}</tr>`
       ).join('')}</tbody>
     </table></div>`;
   }
@@ -862,7 +864,7 @@
       { name: 'これまでの損益の累計', credit: profit },
       { name: '純資産合計', credit: eT, cls: 'sub' },
       { name: '合計', credit: lT + eT, debit: aT, cls: 'total' }
-    ]);
+    ], true);
 
     mainEl.innerHTML = `
       <div class="screen-title">貸借対照表</div>
