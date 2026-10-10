@@ -22,6 +22,7 @@
     --plus: #2e7d4f;
     --minus: #b5482f;
     --card: #7a4fa0;
+    --emoney: #c9711f;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -35,6 +36,7 @@
       --plus: #6cc28f;
       --minus: #e0715a;
       --card: #b893d8;
+      --emoney: #e0954f;
     }
   }
 
@@ -150,6 +152,13 @@
   .tag-cash { background: var(--plus); }
   .tag-card { background: var(--card); }
   .tag-bank { background: var(--accent); }
+  .tag-emoney { background: var(--emoney); }
+  .toggle.three button { font-size: 15px; padding: 10px 0; line-height: 1.3; }
+  .toggle.three button .ic { display: block; font-size: 22px; }
+  .toggle button.on-emoney { border-color: var(--emoney); background: var(--emoney); color: #fff; }
+  .sub-box { margin-top: 10px; padding: 12px; border-radius: 12px; background: var(--accent-soft); }
+  .sub-box .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .optional { font-weight: 400; }
 
   /* --- 帳票 --- */
   .period { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
@@ -235,10 +244,10 @@
   // ============================================================
   const STORAGE_KEY = 'kakeiboData_v1';
   const TYPES = { asset: '資産', liability: '負債', equity: '純資産', income: '収益', expense: '費用' };
-  const ROLES = { cash: '現金', bank: '銀行', card: 'カード' };
+  const ROLES = { cash: '現金', bank: '銀行', card: 'カード', emoney: '電子マネー' };
   const KINDS = {
-    exp_cash: '出費(現金)', exp_card: '出費(カード)', exp_bank: '出費(口座)',
-    deposit: '入金', withdraw: '出金', opening: '開始残高'
+    exp_cash: '出費(現金)', exp_card: '出費(カード)', exp_emoney: '出費(電子マネー)', exp_bank: '出費(口座)',
+    charge: 'チャージ', deposit: '入金', withdraw: '出金', opening: '開始残高'
   };
   const OPENING_ACCOUNT = '元入金';
 
@@ -250,6 +259,7 @@
         a('現金', 'asset', 'cash'),
         a('普通預金', 'asset', 'bank'),
         a('クレジットカード', 'liability', 'card'),
+        a('PayPay', 'asset', 'emoney'), a('Suica', 'asset', 'emoney'),
         a(OPENING_ACCOUNT, 'equity'),
         a('給与', 'income'), a('賞与', 'income'), a('雑収入', 'income'), a('受取利息', 'income'),
         a('食費', 'expense'), a('日用品', 'expense'), a('交通費', 'expense'), a('水道光熱費', 'expense'),
@@ -257,6 +267,8 @@
         a('交際費', 'expense'), a('娯楽費', 'expense'), a('保険料', 'expense'), a('支払手数料', 'expense'),
         a('雑費', 'expense')
       ],
+      payees: [],
+      people: ['自分'],
       txns: []
     };
   }
@@ -266,7 +278,11 @@
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const d = JSON.parse(raw);
-        if (d && Array.isArray(d.accounts) && Array.isArray(d.txns)) return d;
+        if (d && Array.isArray(d.accounts) && Array.isArray(d.txns)) {
+          if (!Array.isArray(d.payees)) d.payees = [];
+          if (!Array.isArray(d.people)) d.people = ['自分'];
+          return d;
+        }
       }
     } catch (e) {}
     return defaultData();
@@ -292,6 +308,14 @@
     data.accounts.push(a);
     saveData();
     return a;
+  }
+
+  // 支払先・使った人のリスト(key: 'payees' | 'people')
+  function addListItem(key, name) {
+    name = (name || '').trim();
+    if (!name) return null;
+    if (!data[key].includes(name)) { data[key].push(name); saveData(); }
+    return name;
   }
 
   function newId() {
@@ -367,7 +391,7 @@
   let tab = 'expense';
   // 入力画面の選択状態は、他の画面に移って戻ってきても保つ
   const ui = {
-    expense: { method: 'cash', card: '', account: '', adding: false },
+    expense: { method: 'cash', card: '', emoney: '', account: '', payee: '', person: '', adding: false, charging: false, chargeFrom: '' },
     deposit: { bank: '', from: '', adding: false },
     withdraw: { bank: '', to: '', adding: false },
     pl: { mode: 'month', year: new Date().getFullYear(), month: new Date().getMonth() + 1 },
@@ -388,10 +412,10 @@
   });
   $('settingsBtn').onclick = () => { ui.settingsOpen = !ui.settingsOpen; render(); mainEl.scrollTop = 0; };
 
-  function chipsHtml(names, selected, attr, addLabel) {
+  function chipsHtml(names, selected, attr, addLabel, addKey) {
     return '<div class="chips">' +
       names.map(n => `<button class="chip${n === selected ? ' on' : ''}" data-${attr}="${esc(n)}">${esc(n)}</button>`).join('') +
-      (addLabel ? `<button class="chip add" data-add="1">＋ ${esc(addLabel)}</button>` : '') +
+      (addLabel ? `<button class="chip add" data-add="${addKey || 'acc'}">＋ ${esc(addLabel)}</button>` : '') +
       '</div>';
   }
 
@@ -424,36 +448,43 @@
     return { amount, date, memo };
   }
 
+  // 「＋ 追加」ボタン。state.adding に開いている入力欄の種類(data-add の値)を持つ
   function bindAddAccount(state, onAdd) {
-    mainEl.querySelectorAll('[data-add]').forEach(b => b.onclick = () => { state.adding = !state.adding; render(); if (state.adding) $('newAccName').focus(); });
+    mainEl.querySelectorAll('[data-add]').forEach(b => b.onclick = () => {
+      state.adding = state.adding === b.dataset.add ? false : b.dataset.add;
+      render();
+      if (state.adding) $('newAccName').focus();
+    });
     const ok = $('newAccOk');
     if (!ok) return;
     const go = () => {
       const name = $('newAccName').value.trim();
-      if (!name) { toast('科目名を入力してください'); return; }
-      const a = onAdd(name);
-      if (a) { state.adding = false; render(); toast(`「${a.name}」を選びました`); }
+      if (!name) { toast('名前を入力してください'); return; }
+      const added = onAdd(name, state.adding);
+      if (added) { state.adding = false; render(); toast(`「${added.name || added}」を選びました`); }
     };
     ok.onclick = go;
     $('newAccName').onkeydown = (e) => { if (e.key === 'Enter') go(); };
   }
 
-  function recentHtml(kinds, title) {
-    const list = data.txns.filter(t => kinds.includes(t.kind))
+  function recentHtml(kinds, title, filter) {
+    const list = data.txns.filter(t => kinds.includes(t.kind) && (!filter || filter(t)))
       .sort((a, b) => (b.date + b.createdAt).localeCompare(a.date + a.createdAt) || b.createdAt - a.createdAt)
       .slice(0, 15);
     const rows = list.map(t => {
       let tag = '', main = '', sub = '';
       if (t.kind === 'exp_cash') { tag = '<span class="tag tag-cash">現金</span>'; main = t.debit; }
       else if (t.kind === 'exp_card') { tag = '<span class="tag tag-card">カード</span>'; main = t.debit; sub = t.credit; }
+      else if (t.kind === 'exp_emoney') { tag = '<span class="tag tag-emoney">電子マネー</span>'; main = t.debit; sub = t.credit; }
       else if (t.kind === 'exp_bank') { tag = '<span class="tag tag-bank">口座</span>'; main = t.debit; sub = t.credit; }
+      else if (t.kind === 'charge') { tag = '<span class="tag tag-emoney">チャージ</span>'; main = t.debit; sub = t.credit + 'から'; }
       else if (t.kind === 'deposit') { const from = acc(t.credit); main = from && from.role === 'cash' ? '現金から預け入れ' : t.credit; sub = t.debit + 'へ'; }
       else if (t.kind === 'withdraw') {
         const to = acc(t.debit);
         main = to && to.role === 'cash' ? '現金で引き出し' : to && to.role === 'card' ? `${t.debit} 引き落とし` : t.debit;
         sub = t.credit + 'から';
       }
-      sub = [shortDate(t.date), sub, t.memo].filter(Boolean).join('　');
+      sub = [shortDate(t.date), t.payee, t.person ? '👤' + t.person : '', sub, t.memo].filter(Boolean).join('　');
       return `<div class="entry">
         <div class="entry-main"><div class="entry-title">${tag}${esc(main)}</div><div class="entry-sub">${esc(sub)}</div></div>
         <div class="entry-amount">${yen(t.amount)}</div>
@@ -472,48 +503,121 @@
   }
 
   // ---------- 出費 ----------
+  const METHOD_KIND = { cash: 'exp_cash', card: 'exp_card', emoney: 'exp_emoney' };
+
+  function balanceOf(name) {
+    const v = sums(null, null)[name] || 0;
+    return acc(name) && acc(name).type === 'liability' ? -v : v;
+  }
+
   function renderExpense() {
     const s = ui.expense;
     const cards = accountsByRole('card');
+    const emoneys = accountsByRole('emoney');
     if (!cards.find(c => c.name === s.card)) s.card = cards[0] ? cards[0].name : '';
+    if (!emoneys.find(c => c.name === s.emoney)) s.emoney = emoneys[0] ? emoneys[0].name : '';
     if (s.method === 'card' && !cards.length) s.method = 'cash';
     const expenses = accountsOf('expense').map(a => a.name);
     if (s.account && !acc(s.account)) s.account = '';
+    if (s.payee && !data.payees.includes(s.payee)) s.payee = '';
+    if (s.person && !data.people.includes(s.person)) s.person = '';
+    const chargeSources = accountsByRole('cash').concat(accountsByRole('bank'), cards).map(a => a.name);
+    if (!chargeSources.includes(s.chargeFrom)) s.chargeFrom = chargeSources[0] || '';
+
+    let methodDetail = '';
+    if (s.method === 'card' && cards.length > 1) {
+      methodDetail = `<div style="margin-top:10px">${chipsHtml(cards.map(c => c.name), s.card, 'card')}</div>`;
+    } else if (s.method === 'emoney') {
+      methodDetail = `
+        <div style="margin-top:10px">${chipsHtml(emoneys.map(c => c.name), s.emoney, 'emoney', '種類を追加', 'emoney')}</div>
+        ${s.adding === 'emoney' ? addRowHtml('電子マネーの名前 (例: nanaco)') : ''}
+        ${s.emoney ? `
+        <div class="sub-box">
+          <div class="row">
+            <span>${esc(s.emoney)} 残高 <b>${yen(balanceOf(s.emoney))}</b></span>
+            <button class="btn" id="chargeToggle">${s.charging ? '閉じる' : '＋ チャージ'}</button>
+          </div>
+          ${s.charging ? `
+          <div style="margin-top:12px">
+            <label class="label">チャージ元</label>
+            ${chipsHtml(chargeSources, s.chargeFrom, 'chfrom')}
+            <div class="amount-wrap" style="margin-top:10px"><input class="input amount-input" style="font-size:20px" id="chAmount" inputmode="numeric" placeholder="0" autocomplete="off"></div>
+            <input class="input" type="date" id="chDate" value="${today()}" style="margin-top:8px">
+            <button class="btn-primary" id="chSave" style="margin-top:10px;font-size:16px;padding:12px 0">チャージを登録</button>
+          </div>` : ''}
+        </div>` : ''}`;
+    }
 
     mainEl.innerHTML = `
       <div class="screen-title">出費を入力</div>
       <div class="card">
         <div class="field">
           <label class="label">支払い方法</label>
-          <div class="toggle">
-            <button id="mCash" class="${s.method === 'cash' ? 'on-cash' : ''}">💴 現金</button>
-            <button id="mCard" class="${s.method === 'card' ? 'on-card' : ''}">💳 カード</button>
+          <div class="toggle three">
+            <button data-method="cash" class="${s.method === 'cash' ? 'on-cash' : ''}"><span class="ic">💴</span>現金</button>
+            <button data-method="card" class="${s.method === 'card' ? 'on-card' : ''}"><span class="ic">💳</span>カード</button>
+            <button data-method="emoney" class="${s.method === 'emoney' ? 'on-emoney' : ''}"><span class="ic">📱</span>電子マネー</button>
           </div>
-          ${s.method === 'card' && cards.length > 1 ? `<div style="margin-top:10px">${chipsHtml(cards.map(c => c.name), s.card, 'card')}</div>` : ''}
+          ${methodDetail}
         </div>
         <div class="field">
           <label class="label">勘定科目</label>
-          ${chipsHtml(expenses, s.account, 'acc', '科目を追加')}
-          ${s.adding ? addRowHtml('新しい費用の科目名 (例: ペット費)') : ''}
+          ${chipsHtml(expenses, s.account, 'acc', '科目を追加', 'acc')}
+          ${s.adding === 'acc' ? addRowHtml('新しい費用の科目名 (例: ペット費)') : ''}
+        </div>
+        <div class="field">
+          <label class="label">支払先 <span class="optional">(任意)</span></label>
+          ${chipsHtml(data.payees, s.payee, 'payee', '支払先を追加', 'payee')}
+          ${s.adding === 'payee' ? addRowHtml('支払先の名前 (例: イオン)') : ''}
+        </div>
+        <div class="field">
+          <label class="label">使った人 <span class="optional">(任意)</span></label>
+          ${chipsHtml(data.people, s.person, 'person', '名前を追加', 'person')}
+          ${s.adding === 'person' ? addRowHtml('名前 (例: 妻)') : ''}
         </div>
         ${commonFieldsHtml('ex')}
         <button class="btn-primary" id="exSave">登録する</button>
       </div>
-      ${recentHtml(['exp_cash', 'exp_card'], '最近の出費')}`;
+      ${recentHtml(['exp_cash', 'exp_card', 'exp_emoney', 'charge'], '最近の出費')}`;
 
-    $('mCash').onclick = () => { s.method = 'cash'; render(); };
-    $('mCard').onclick = () => {
-      if (!cards.length) { toast('設定でクレジットカードを登録してください'); return; }
-      s.method = 'card'; render();
-    };
+    mainEl.querySelectorAll('[data-method]').forEach(b => b.onclick = () => {
+      const m = b.dataset.method;
+      if (m === 'card' && !cards.length) { toast('設定でクレジットカードを登録してください'); return; }
+      s.method = m; render();
+    });
     mainEl.querySelectorAll('[data-card]').forEach(b => b.onclick = () => { s.card = b.dataset.card; render(); });
+    mainEl.querySelectorAll('[data-emoney]').forEach(b => b.onclick = () => { s.emoney = b.dataset.emoney; render(); });
     mainEl.querySelectorAll('[data-acc]').forEach(b => b.onclick = () => { s.account = b.dataset.acc; render(); });
-    bindAddAccount(s, (name) => {
-      const a = addAccount(name, 'expense');
-      if (a && a.type !== 'expense') { toast(`「${name}」は${TYPES[a.type]}の科目です`); return null; }
-      if (a) s.account = a.name;
+    // 支払先・使った人は、選択中をもう一度押すと選択解除
+    mainEl.querySelectorAll('[data-payee]').forEach(b => b.onclick = () => { s.payee = s.payee === b.dataset.payee ? '' : b.dataset.payee; render(); });
+    mainEl.querySelectorAll('[data-person]').forEach(b => b.onclick = () => { s.person = s.person === b.dataset.person ? '' : b.dataset.person; render(); });
+    bindAddAccount(s, (name, key) => {
+      if (key === 'payee') return (s.payee = addListItem('payees', name));
+      if (key === 'person') return (s.person = addListItem('people', name));
+      const type = key === 'emoney' ? 'asset' : 'expense';
+      const a = addAccount(name, type, key === 'emoney' ? 'emoney' : '');
+      if (a && (a.type !== type || (key === 'emoney' && a.role !== 'emoney'))) { toast(`「${name}」は${TYPES[a.type]}の科目です`); return null; }
+      if (a && key === 'emoney') s.emoney = a.name;
+      else if (a) s.account = a.name;
       return a;
     });
+
+    if ($('chargeToggle')) $('chargeToggle').onclick = () => { s.charging = !s.charging; render(); if (s.charging) $('chAmount').focus(); };
+    mainEl.querySelectorAll('[data-chfrom]').forEach(b => b.onclick = () => {
+      const keep = $('chAmount').value;
+      s.chargeFrom = b.dataset.chfrom; render();
+      $('chAmount').value = keep;
+    });
+    if ($('chSave')) $('chSave').onclick = () => {
+      const amount = parseAmount($('chAmount').value);
+      if (!amount || amount <= 0) { toast('チャージ金額を入力してください'); return; }
+      if (!s.chargeFrom) { toast('チャージ元を選んでください'); return; }
+      addTxn({ kind: 'charge', date: $('chDate').value || today(), debit: s.emoney, credit: s.chargeFrom, amount });
+      s.charging = false;
+      toast(`${s.emoney}に ${yen(amount)} チャージしました`);
+      render();
+    };
+
     $('exSave').onclick = () => {
       if (!s.account) { toast('勘定科目を選んでください'); return; }
       const c = readCommon('ex'); if (!c) return;
@@ -522,11 +626,15 @@
         const cash = accountsByRole('cash')[0];
         if (!cash) { toast('現金の科目がありません'); return; }
         credit = cash.name;
-      } else {
+      } else if (s.method === 'card') {
         credit = s.card;
+      } else {
+        if (!s.emoney) { toast('電子マネーの種類を選んでください'); return; }
+        credit = s.emoney;
       }
-      addTxn({ kind: s.method === 'cash' ? 'exp_cash' : 'exp_card', date: c.date, debit: s.account, credit, amount: c.amount, memo: c.memo });
+      addTxn({ kind: METHOD_KIND[s.method], date: c.date, debit: s.account, credit, amount: c.amount, memo: c.memo, payee: s.payee || '', person: s.person || '' });
       toast(`${s.account} ${yen(c.amount)} を登録しました`);
+      s.payee = '';
       render();
     };
     bindDelete();
@@ -594,6 +702,7 @@
     const options = [];
     if (cash) options.push({ key: cash.name, label: '現金で引き出し' });
     accountsByRole('card').forEach(c => options.push({ key: c.name, label: `${c.name} 引き落とし` }));
+    accountsByRole('emoney').forEach(c => options.push({ key: c.name, label: `${c.name}へチャージ` }));
     const expenseOptions = accountsOf('expense').map(a => ({ key: a.name, label: a.name }));
     if (s.to && !acc(s.to)) s.to = '';
     const chip = (o) => `<button class="chip${o.key === s.to ? ' on' : ''}" data-to="${esc(o.key)}">${esc(o.label)}</button>`;
@@ -617,7 +726,7 @@
         ${commonFieldsHtml('wd')}
         <button class="btn-primary" id="wdSave">出金を登録</button>
       </div>
-      ${recentHtml(['withdraw', 'exp_bank'], '最近の出金')}`;
+      ${recentHtml(['withdraw', 'exp_bank', 'charge'], '最近の出金', t => acc(t.credit) && acc(t.credit).role === 'bank')}`;
 
     mainEl.querySelectorAll('[data-bank]').forEach(b => b.onclick = () => { s.bank = b.dataset.bank; render(); });
     mainEl.querySelectorAll('[data-to]').forEach(b => b.onclick = () => { s.to = b.dataset.to; render(); });
@@ -630,7 +739,8 @@
     $('wdSave').onclick = () => {
       if (!s.to) { toast('出金の内容を選んでください'); return; }
       const c = readCommon('wd'); if (!c) return;
-      const kind = acc(s.to).type === 'expense' ? 'exp_bank' : 'withdraw';
+      const to = acc(s.to);
+      const kind = to.type === 'expense' ? 'exp_bank' : to.role === 'emoney' ? 'charge' : 'withdraw';
       addTxn({ kind, date: c.date, debit: s.to, credit: s.bank, amount: c.amount, memo: c.memo });
       toast(`出金 ${yen(c.amount)} を登録しました`);
       render();
@@ -755,7 +865,7 @@
     const groups = ['asset', 'liability', 'equity', 'income', 'expense'].map(type => {
       const rows = accountsOf(type).map(a => `
         <div class="entry">
-          <div class="entry-main"><div class="entry-title">${a.role ? `<span class="tag tag-${a.role === 'card' ? 'card' : a.role === 'cash' ? 'cash' : 'bank'}">${ROLES[a.role]}</span>` : ''}${esc(a.name)}</div></div>
+          <div class="entry-main"><div class="entry-title">${a.role ? `<span class="tag tag-${a.role}">${ROLES[a.role]}</span>` : ''}${esc(a.name)}</div></div>
           ${used.has(a.name) || a.name === OPENING_ACCOUNT || a.role === 'cash' ? '<span class="muted">使用中</span>' : `<button class="entry-del" data-delacc="${esc(a.name)}" aria-label="削除">🗑</button>`}
         </div>`).join('');
       return `<div class="report-head" style="margin-top:10px">${TYPES[type]}</div>${rows || '<div class="empty">なし</div>'}`;
@@ -802,6 +912,7 @@
             <option value="income">収益(入金の科目)</option>
             <option value="bank">銀行口座</option>
             <option value="card">クレジットカード</option>
+            <option value="emoney">電子マネー</option>
             <option value="asset">その他の資産</option>
             <option value="liability">その他の負債(ローンなど)</option>
           </select>
@@ -809,6 +920,13 @@
         </div>
         ${groups}
       </div>
+
+      ${['payees', 'people'].map(key => `
+      <div class="section-head">${key === 'payees' ? '支払先' : '使った人'}</div>
+      <div class="card">
+        <div class="add-row" style="margin-top:0"><input class="input" id="li_${key}" placeholder="${key === 'payees' ? '支払先の名前' : '名前'}" maxlength="30"><button class="btn" data-listadd="${key}">追加</button></div>
+        ${data[key].map(n => `<div class="entry"><div class="entry-main"><div class="entry-title">${esc(n)}</div></div><button class="entry-del" data-listdel="${key}" data-name="${esc(n)}" aria-label="削除">🗑</button></div>`).join('') || '<div class="empty">なし</div>'}
+      </div>`).join('')}
 
       <div class="section-head">開始残高(使い始めた日の残高)</div>
       <div class="card">
@@ -835,6 +953,7 @@
       if (acc(name)) { toast(`「${name}」は既にあります`); return; }
       if (v === 'bank') addAccount(name, 'asset', 'bank');
       else if (v === 'card') addAccount(name, 'liability', 'card');
+      else if (v === 'emoney') addAccount(name, 'asset', 'emoney');
       else addAccount(name, v);
       toast(`「${name}」を追加しました`);
       render();
@@ -843,6 +962,21 @@
       const name = b.dataset.delacc;
       confirmBox(`科目「${name}」を削除しますか？`, () => {
         data.accounts = data.accounts.filter(a => a.name !== name);
+        saveData(); render(); toast('削除しました');
+      });
+    });
+
+    mainEl.querySelectorAll('[data-listadd]').forEach(b => b.onclick = () => {
+      const key = b.dataset.listadd;
+      const name = $('li_' + key).value.trim();
+      if (!name) { toast('名前を入力してください'); return; }
+      if (data[key].includes(name)) { toast(`「${name}」は既にあります`); return; }
+      addListItem(key, name); render(); toast(`「${name}」を追加しました`);
+    });
+    mainEl.querySelectorAll('[data-listdel]').forEach(b => b.onclick = () => {
+      const key = b.dataset.listdel, name = b.dataset.name;
+      confirmBox(`「${name}」を一覧から削除しますか？\n(これまでの記録はそのまま残ります)`, () => {
+        data[key] = data[key].filter(n => n !== name);
         saveData(); render(); toast('削除しました');
       });
     });
@@ -879,8 +1013,9 @@
   const SHEET_FILE_NAME = '家計簿データ';
   const SHEET_ID_KEY = 'kakeiboSheetId_v1';
   const FOLDER_KEY = 'kakeiboFolder_v1';
-  const SH_TX = '取引', SH_ACC = '勘定科目', SH_META = '設定';
-  const TX_HEADER = ['ID', '日付', '区分', '借方科目', '貸方科目', '金額', '摘要', '登録日時'];
+  const SH_TX = '取引', SH_ACC = '勘定科目', SH_META = '設定', SH_LIST = 'リスト';
+  const SHEET_TABS = [SH_TX, SH_ACC, SH_META, SH_LIST];
+  const TX_HEADER = ['ID', '日付', '区分', '借方科目', '貸方科目', '金額', '摘要', '登録日時', '支払先', '使った人'];
   const ACC_HEADER = ['科目名', '分類', '種別', '借方合計', '貸方合計', '残高'];
 
   let syncState = 'signed_out'; // 'signed_out' | 'idle' | 'syncing' | 'error'
@@ -1059,10 +1194,10 @@
     const r = await apiJson(`${SHEETS}/${sheetId}?fields=sheets.properties(sheetId,title)`);
     const sheets = r.sheets.map(s => s.properties);
     const titles = sheets.map(s => s.title);
-    const need = [SH_TX, SH_ACC, SH_META].filter(t => !titles.includes(t));
+    const need = SHEET_TABS.filter(t => !titles.includes(t));
     if (!need.length) return;
     const requests = [];
-    if (sheets.length === 1 && ![SH_TX, SH_ACC, SH_META].includes(sheets[0].title)) {
+    if (sheets.length === 1 && !SHEET_TABS.includes(sheets[0].title)) {
       requests.push({ updateSheetProperties: { properties: { sheetId: sheets[0].sheetId, title: need.shift() }, fields: 'title' } });
     }
     need.forEach(title => requests.push({ addSheet: { properties: { title } } }));
@@ -1094,9 +1229,9 @@
   }
 
   async function readSheet() {
-    const ranges = [`'${SH_TX}'!A2:H`, `'${SH_ACC}'!A2:C`, `'${SH_META}'!B1`].map(encodeURIComponent).join('&ranges=');
+    const ranges = [`'${SH_TX}'!A2:J`, `'${SH_ACC}'!A2:C`, `'${SH_META}'!B1`, `'${SH_LIST}'!A2:B`].map(encodeURIComponent).join('&ranges=');
     const r = await apiJson(`${SHEETS}/${sheetId}/values:batchGet?ranges=${ranges}&valueRenderOption=UNFORMATTED_VALUE`);
-    const [tx, ac, meta] = r.valueRanges.map(v => v.values || []);
+    const [tx, ac, meta, list] = r.valueRanges.map(v => v.values || []);
     const updatedAt = Number(meta[0] && meta[0][0]) || 0;
     const accounts = ac.filter(row => row[0]).map(row => ({ name: String(row[0]).trim(), type: typeKey(row[1]), role: roleKey(row[2]) }));
     const txns = tx.filter(row => row[3] && row[4] && row[5]).map((row, i) => ({
@@ -1107,20 +1242,26 @@
       credit: String(row[4]).trim(),
       amount: Math.round(Number(row[5]) || 0),
       memo: String(row[6] || ''),
-      createdAt: Number(row[7]) || Date.parse(String(row[7] || '')) || 0
+      createdAt: Number(row[7]) || Date.parse(String(row[7] || '')) || 0,
+      payee: String(row[8] || '').trim(),
+      person: String(row[9] || '').trim()
     })).filter(t => t.amount > 0);
+    const payees = [], people = [];
+    const push = (arr, v) => { v = String(v || '').trim(); if (v && !arr.includes(v)) arr.push(v); };
+    list.forEach(row => { push(payees, row[0]); push(people, row[1]); });
+    txns.forEach(t => { push(payees, t.payee); push(people, t.person); });
     // シートで直接書いた科目が勘定科目シートに無い場合は費用として補う
     txns.forEach(t => [t.debit, t.credit].forEach(n => {
       if (!accounts.find(a => a.name === n)) accounts.push({ name: n, type: 'expense', role: '' });
     }));
-    return { updatedAt, accounts, txns, empty: !accounts.length && !txns.length };
+    return { updatedAt, accounts, txns, payees, people, empty: !accounts.length && !txns.length };
   }
 
   async function writeSheet() {
     await ensureTabs();
     const txRows = [TX_HEADER].concat(
       data.txns.slice().sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt)
-        .map(t => [t.id, t.date, KINDS[t.kind] || t.kind, t.debit, t.credit, t.amount, t.memo || '', new Date(t.createdAt || 0).toLocaleString('ja-JP')])
+        .map(t => [t.id, t.date, KINDS[t.kind] || t.kind, t.debit, t.credit, t.amount, t.memo || '', new Date(t.createdAt || 0).toLocaleString('ja-JP'), t.payee || '', t.person || ''])
     );
     const q = (s) => `'${s}'`;
     const accRows = [ACC_HEADER].concat(data.accounts.map((a, i) => {
@@ -1130,8 +1271,10 @@
         `=SUMIFS(${q(SH_TX)}!$F:$F,${q(SH_TX)}!$E:$E,$A${r})`,
         `=IF(OR($B${r}="資産",$B${r}="費用"),D${r}-E${r},E${r}-D${r})`];
     }));
+    const listRows = [['支払先', '使った人']];
+    for (let i = 0; i < Math.max(data.payees.length, data.people.length); i++) listRows.push([data.payees[i] || '', data.people[i] || '']);
     await apiJson(`${SHEETS}/${sheetId}/values:batchClear`, {
-      method: 'POST', json: { ranges: [`'${SH_TX}'!A:H`, `'${SH_ACC}'!A:F`, `'${SH_META}'!A:B`] }
+      method: 'POST', json: { ranges: [`'${SH_TX}'!A:J`, `'${SH_ACC}'!A:F`, `'${SH_META}'!A:B`, `'${SH_LIST}'!A:B`] }
     });
     await apiJson(`${SHEETS}/${sheetId}/values:batchUpdate`, {
       method: 'POST', json: {
@@ -1139,6 +1282,7 @@
         data: [
           { range: `'${SH_TX}'!A1`, values: txRows },
           { range: `'${SH_ACC}'!A1`, values: accRows.map(r => r.slice(0, 3)) },
+          { range: `'${SH_LIST}'!A1`, values: listRows },
           { range: `'${SH_META}'!A1`, values: [['最終更新', data.updatedAt], ['最終更新(表示用)', new Date(data.updatedAt || Date.now()).toLocaleString('ja-JP')], ['アプリ', '家計簿 v1']] }
         ]
       }
@@ -1174,7 +1318,7 @@
         } else throw e;
       }
       if (!remote.empty && (force || remote.updatedAt > (data.updatedAt || 0))) {
-        data = { updatedAt: force ? Date.now() : remote.updatedAt, accounts: remote.accounts, txns: remote.txns };
+        data = { updatedAt: force ? Date.now() : remote.updatedAt, accounts: remote.accounts, txns: remote.txns, payees: remote.payees, people: remote.people.length ? remote.people : ['自分'] };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
         if (force) await writeSheet(); // 最終更新を揃えておく
         render();
