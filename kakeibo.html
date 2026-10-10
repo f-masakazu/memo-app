@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2f4f6f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="家計簿">
+<link rel="manifest" href="kakeibo-manifest.json">
+<link rel="icon" href="kakeibo-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="kakeibo-icon.svg">
+<title>家計簿</title>
+<style>
+  :root {
+    --bg: #faf7f2;
+    --surface: #ffffff;
+    --border: #e7e0d4;
+    --ink: #2b2620;
+    --ink-muted: #8a8172;
+    --accent: #2f4f6f;
+    --accent-soft: #eef2f6;
+    --plus: #2e7d4f;
+    --minus: #b5482f;
+    --card: #7a4fa0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1a17;
+      --surface: #262320;
+      --border: #3a3630;
+      --ink: #ece7de;
+      --ink-muted: #9a9184;
+      --accent: #7fa8c9;
+      --accent-soft: #2a3742;
+      --plus: #6cc28f;
+      --minus: #e0715a;
+      --card: #b893d8;
+    }
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; overscroll-behavior: none; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+  }
+  .hidden { display: none !important; }
+  button, input, select { font-family: inherit; }
+
+  /* --- topbar --- */
+  .topbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: max(12px, env(safe-area-inset-top)) 14px 10px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .app-title { flex: 1; font-size: 18px; font-weight: 700; margin: 0; }
+  .sync-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-muted); }
+  .sync-dot.idle { background: var(--plus); }
+  .sync-dot.syncing { background: #d9a441; }
+  .sync-dot.error { background: var(--minus); }
+  .icon-btn {
+    background: none; border: none; font-size: 22px; padding: 4px 8px;
+    cursor: pointer; border-radius: 8px; color: var(--ink);
+  }
+  .icon-btn:active { background: var(--accent-soft); }
+
+  /* --- main --- */
+  main { flex: 1 1 auto; overflow-y: auto; padding: 14px 14px 24px; }
+  .screen-title { font-size: 20px; font-weight: 700; margin: 2px 0 14px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+  .field { margin-bottom: 16px; }
+  .field:last-child { margin-bottom: 0; }
+  .label { display: block; font-size: 13px; color: var(--ink-muted); margin-bottom: 6px; font-weight: 600; }
+  .input {
+    width: 100%;
+    font-size: 17px;
+    padding: 11px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--ink);
+  }
+  .amount-wrap { position: relative; }
+  .amount-wrap::before {
+    content: "¥"; position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    font-size: 22px; color: var(--ink-muted);
+  }
+  .amount-input { font-size: 26px; font-weight: 700; padding-left: 34px; text-align: right; }
+
+  .toggle { display: flex; gap: 8px; }
+  .toggle button {
+    flex: 1; font-size: 17px; font-weight: 700; padding: 14px 0;
+    border-radius: 12px; border: 2px solid var(--border);
+    background: var(--bg); color: var(--ink-muted); cursor: pointer;
+  }
+  .toggle button.on-cash { border-color: var(--plus); background: var(--plus); color: #fff; }
+  .toggle button.on-card { border-color: var(--card); background: var(--card); color: #fff; }
+  .toggle button.on { border-color: var(--accent); background: var(--accent); color: #fff; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font-size: 15px; padding: 9px 14px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--ink); cursor: pointer;
+  }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+  .chip.add { border-style: dashed; color: var(--accent); }
+  .add-row { display: flex; gap: 8px; margin-top: 10px; }
+  .add-row .input { flex: 1; font-size: 15px; padding: 9px 10px; }
+
+  .btn {
+    font-size: 15px; font-weight: 600; padding: 11px 14px; border-radius: 10px;
+    border: none; cursor: pointer; background: var(--accent-soft); color: var(--accent);
+  }
+  .btn-primary {
+    width: 100%; font-size: 18px; font-weight: 700; padding: 16px 0; border-radius: 12px;
+    border: none; cursor: pointer; background: var(--accent); color: #fff;
+  }
+  .btn-primary:active, .btn:active { opacity: 0.8; }
+  .btn-danger { background: var(--minus); color: #fff; }
+
+  /* --- 記録一覧 --- */
+  .section-head { font-size: 14px; color: var(--ink-muted); font-weight: 700; margin: 6px 2px 8px; }
+  .entry {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .entry:last-child { border-bottom: none; }
+  .entry-main { flex: 1; min-width: 0; }
+  .entry-title { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .entry-sub { font-size: 12px; color: var(--ink-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .entry-amount { font-size: 16px; font-weight: 700; white-space: nowrap; }
+  .entry-del { background: none; border: none; font-size: 16px; color: var(--ink-muted); padding: 6px; cursor: pointer; }
+  .empty { text-align: center; color: var(--ink-muted); font-size: 14px; padding: 14px 0; }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px; color: #fff; margin-right: 4px; vertical-align: 1px; }
+  .tag-cash { background: var(--plus); }
+  .tag-card { background: var(--card); }
+  .tag-bank { background: var(--accent); }
+
+  /* --- 帳票 --- */
+  .period { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .period .label-big { flex: 1; text-align: center; font-size: 18px; font-weight: 700; }
+  .period .icon-btn { font-size: 20px; background: var(--surface); border: 1px solid var(--border); width: 44px; height: 44px; }
+  .report-row { display: flex; justify-content: space-between; padding: 9px 2px; border-bottom: 1px dotted var(--border); font-size: 15px; }
+  .report-row:last-child { border-bottom: none; }
+  .report-row .v { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .report-total { display: flex; justify-content: space-between; padding: 10px 2px 2px; margin-top: 4px; border-top: 2px solid var(--ink); font-weight: 700; font-size: 16px; }
+  .report-head { font-size: 16px; font-weight: 700; margin: 0 0 6px; }
+  .result-box { text-align: center; padding: 18px 10px; }
+  .result-box .cap { font-size: 14px; color: var(--ink-muted); }
+  .result-box .num { font-size: 32px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .plus { color: var(--plus); }
+  .minus { color: var(--minus); }
+  .muted { color: var(--ink-muted); font-size: 13px; }
+  .note { font-size: 13px; color: var(--ink-muted); line-height: 1.6; }
+
+  /* --- bottom tabs --- */
+  .tabbar {
+    flex: 0 0 auto; display: flex;
+    background: var(--surface); border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tabbar button {
+    flex: 1; background: none; border: none; padding: 8px 0 9px; cursor: pointer;
+    color: var(--ink-muted); font-size: 11px; font-weight: 600;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  .tabbar button .ic { font-size: 22px; line-height: 1.1; }
+  .tabbar button.on { color: var(--accent); }
+  .tabbar button.on .ic { transform: scale(1.1); }
+
+  /* --- toast / modal --- */
+  .toast {
+    position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 999px;
+    font-size: 15px; font-weight: 600; z-index: 50; max-width: 90%; text-align: center;
+  }
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+    display: flex; align-items: center; justify-content: center; z-index: 40; padding: 20px;
+  }
+  .modal { background: var(--surface); border-radius: 14px; padding: 20px; width: 100%; max-width: 380px; }
+  .modal p { margin: 0 0 16px; font-size: 16px; line-height: 1.6; white-space: pre-wrap; }
+  .modal-actions { display: flex; gap: 10px; }
+  .modal-actions button { flex: 1; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="app-title" id="appTitle">家計簿</h1>
+  <span class="sync-dot" id="syncDot" title=""></span>
+  <button class="icon-btn" id="settingsBtn" aria-label="設定">⚙️</button>
+</header>
+
+<main id="main"></main>
+
+<nav class="tabbar" id="tabbar">
+  <button data-tab="expense"><span class="ic">💸</span>出費</button>
+  <button data-tab="deposit"><span class="ic">🏦</span>入金</button>
+  <button data-tab="withdraw"><span class="ic">🏧</span>出金</button>
+  <button data-tab="pl"><span class="ic">📊</span>損益</button>
+  <button data-tab="bs"><span class="ic">⚖️</span>貸借</button>
+</nav>
+
+<div id="toast" class="toast hidden"></div>
+
+<div id="confirmOverlay" class="overlay hidden">
+  <div class="modal">
+    <p id="confirmMsg"></p>
+    <div class="modal-actions">
+      <button class="btn" id="confirmCancel">キャンセル</button>
+      <button class="btn btn-danger" id="confirmOk">OK</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ============================================================
+  //  データ
+  // ============================================================
+  const STORAGE_KEY = 'kakeiboData_v1';
+  const TYPES = { asset: '資産', liability: '負債', equity: '純資産', income: '収益', expense: '費用' };
+  const ROLES = { cash: '現金', bank: '銀行', card: 'カード' };
+  const KINDS = {
+    exp_cash: '出費(現金)', exp_card: '出費(カード)', exp_bank: '出費(口座)',
+    deposit: '入金', withdraw: '出金', opening: '開始残高'
+  };
+  const OPENING_ACCOUNT = '元入金';
+
+  function defaultData() {
+    const a = (name, type, role) => ({ name, type, role: role || '' });
+    return {
+      updatedAt: 0,
+      accounts: [
+        a('現金', 'asset', 'cash'),
+        a('普通預金', 'asset', 'bank'),
+        a('クレジットカード', 'liability', 'card'),
+        a(OPENING_ACCOUNT, 'equity'),
+        a('給与', 'income'), a('賞与', 'income'), a('雑収入', 'income'), a('受取利息', 'income'),
+        a('食費', 'expense'), a('日用品', 'expense'), a('交通費', 'expense'), a('水道光熱費', 'expense'),
+        a('通信費', 'expense'), a('住居費', 'expense'), a('医療費', 'expense'), a('衣服費', 'expense'),
+        a('交際費', 'expense'), a('娯楽費', 'expense'), a('保険料', 'expense'), a('支払手数料', 'expense'),
+        a('雑費', 'expense')
+      ],
+      txns: []
+    };
+  }
+
+  function loadData() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d && Array.isArray(d.accounts) && Array.isArray(d.txns)) return d;
+      }
+    } catch (e) {}
+    return defaultData();
+  }
+
+  let data = loadData();
+
+  function saveData() {
+    data.updatedAt = Date.now();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    scheduleSheetSync();
+  }
+
+  const acc = (name) => data.accounts.find(a => a.name === name);
+  const accountsOf = (type) => data.accounts.filter(a => a.type === type);
+  const accountsByRole = (role) => data.accounts.filter(a => a.role === role);
+
+  function addAccount(name, type, role) {
+    name = (name || '').trim();
+    if (!name) return null;
+    if (acc(name)) { toast(`「${name}」は既にあります`); return acc(name); }
+    const a = { name, type, role: role || '' };
+    data.accounts.push(a);
+    saveData();
+    return a;
+  }
+
+  function newId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
+  function addTxn(t) {
+    data.txns.push(Object.assign({ id: newId(), memo: '', createdAt: Date.now() }, t));
+    saveData();
+  }
+
+  function deleteTxn(id) {
+    data.txns = data.txns.filter(t => t.id !== id);
+    saveData();
+  }
+
+  // 残高計算: 期間内の科目ごとの (借方合計 - 貸方合計)
+  function sums(fromDate, toDate) {
+    const m = {};
+    for (const t of data.txns) {
+      if (fromDate && t.date < fromDate) continue;
+      if (toDate && t.date > toDate) continue;
+      m[t.debit] = (m[t.debit] || 0) + t.amount;
+      m[t.credit] = (m[t.credit] || 0) - t.amount;
+    }
+    return m;
+  }
+
+  // ============================================================
+  //  ユーティリティ
+  // ============================================================
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const yen = (n) => (n < 0 ? '-' : '') + '¥' + Math.abs(Math.round(n)).toLocaleString('ja-JP');
+  function today() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function shortDate(s) {
+    const [y, m, d] = s.split('-');
+    return `${Number(m)}/${Number(d)}`;
+  }
+  function parseAmount(s) {
+    const n = Number(String(s).replace(/[,，¥￥\s]/g, '').replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)));
+    return Number.isFinite(n) ? Math.round(n) : NaN;
+  }
+
+  let toastTimer = null;
+  function toast(msg) {
+    const el = $('toast');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.add('hidden'), 2200);
+  }
+
+  let confirmCb = null;
+  function confirmBox(msg, onOk) {
+    $('confirmMsg').textContent = msg;
+    confirmCb = onOk;
+    $('confirmOverlay').classList.remove('hidden');
+  }
+  $('confirmCancel').onclick = () => { $('confirmOverlay').classList.add('hidden'); confirmCb = null; };
+  $('confirmOk').onclick = () => {
+    $('confirmOverlay').classList.add('hidden');
+    const cb = confirmCb; confirmCb = null;
+    if (cb) cb();
+  };
+
+  // ============================================================
+  //  画面
+  // ============================================================
+  let tab = 'expense';
+  // 入力画面の選択状態は、他の画面に移って戻ってきても保つ
+  const ui = {
+    expense: { method: 'cash', card: '', account: '', adding: false },
+    deposit: { bank: '', from: '', adding: false },
+    withdraw: { bank: '', to: '', adding: false },
+    pl: { mode: 'month', year: new Date().getFullYear(), month: new Date().getMonth() + 1 },
+    bs: { date: today() },
+    settingsOpen: false
+  };
+
+  const mainEl = $('main');
+
+  function render() {
+    document.querySelectorAll('#tabbar button').forEach(b => b.classList.toggle('on', !ui.settingsOpen && b.dataset.tab === tab));
+    if (ui.settingsOpen) { renderSettings(); return; }
+    ({ expense: renderExpense, deposit: renderDeposit, withdraw: renderWithdraw, pl: renderPL, bs: renderBS })[tab]();
+  }
+
+  document.querySelectorAll('#tabbar button').forEach(b => {
+    b.onclick = () => { tab = b.dataset.tab; ui.settingsOpen = false; render(); mainEl.scrollTop = 0; };
+  });
+  $('settingsBtn').onclick = () => { ui.settingsOpen = !ui.settingsOpen; render(); mainEl.scrollTop = 0; };
+
+  function chipsHtml(names, selected, attr, addLabel) {
+    return '<div class="chips">' +
+      names.map(n => `<button class="chip${n === selected ? ' on' : ''}" data-${attr}="${esc(n)}">${esc(n)}</button>`).join('') +
+      (addLabel ? `<button class="chip add" data-add="1">＋ ${esc(addLabel)}</button>` : '') +
+      '</div>';
+  }
+
+  function addRowHtml(placeholder) {
+    return `<div class="add-row"><input class="input" id="newAccName" placeholder="${esc(placeholder)}" maxlength="30"><button class="btn" id="newAccOk">追加</button></div>`;
+  }
+
+  function commonFieldsHtml(prefix) {
+    return `
+      <div class="field">
+        <label class="label">金額</label>
+        <div class="amount-wrap"><input class="input amount-input" id="${prefix}Amount" inputmode="numeric" placeholder="0" autocomplete="off"></div>
+      </div>
+      <div class="field">
+        <label class="label">日付</label>
+        <input class="input" type="date" id="${prefix}Date" value="${today()}">
+      </div>
+      <div class="field">
+        <label class="label">メモ(任意)</label>
+        <input class="input" id="${prefix}Memo" placeholder="例: スーパー○○" maxlength="100">
+      </div>`;
+  }
+
+  function readCommon(prefix) {
+    const amount = parseAmount($(prefix + 'Amount').value);
+    const date = $(prefix + 'Date').value;
+    const memo = $(prefix + 'Memo').value.trim();
+    if (!amount || amount <= 0) { toast('金額を入力してください'); $(prefix + 'Amount').focus(); return null; }
+    if (!date) { toast('日付を入力してください'); return null; }
+    return { amount, date, memo };
+  }
+
+  function bindAddAccount(state, onAdd) {
+    mainEl.querySelectorAll('[data-add]').forEach(b => b.onclick = () => { state.adding = !state.adding; render(); if (state.adding) $('newAccName').focus(); });
+    const ok = $('newAccOk');
+    if (!ok) return;
+    const go = () => {
+      const name = $('newAccName').value.trim();
+      if (!name) { toast('科目名を入力してください'); return; }
+      const a = onAdd(name);
+      if (a) { state.adding = false; render(); toast(`「${a.name}」を選びました`); }
+    };
+    ok.onclick = go;
+    $('newAccName').onkeydown = (e) => { if (e.key === 'Enter') go(); };
+  }
+
+  function recentHtml(kinds, title) {
+    const list = data.txns.filter(t => kinds.includes(t.kind))
+      .sort((a, b) => (b.date + b.createdAt).localeCompare(a.date + a.createdAt) || b.createdAt - a.createdAt)
+      .slice(0, 15);
+    const rows = list.map(t => {
+      let tag = '', main = '', sub = '';
+      if (t.kind === 'exp_cash') { tag = '<span class="tag tag-cash">現金</span>'; main = t.debit; }
+      else if (t.kind === 'exp_card') { tag = '<span class="tag tag-card">カード</span>'; main = t.debit; sub = t.credit; }
+      else if (t.kind === 'exp_bank') { tag = '<span class="tag tag-bank">口座</span>'; main = t.debit; sub = t.credit; }
+      else if (t.kind === 'deposit') { const from = acc(t.credit); main = from && from.role === 'cash' ? '現金から預け入れ' : t.credit; sub = t.debit + 'へ'; }
+      else if (t.kind === 'withdraw') {
+        const to = acc(t.debit);
+        main = to && to.role === 'cash' ? '現金で引き出し' : to && to.role === 'card' ? `${t.debit} 引き落とし` : t.debit;
+        sub = t.credit + 'から';
+      }
+      sub = [shortDate(t.date), sub, t.memo].filter(Boolean).join('　');
+      return `<div class="entry">
+        <div class="entry-main"><div class="entry-title">${tag}${esc(main)}</div><div class="entry-sub">${esc(sub)}</div></div>
+        <div class="entry-amount">${yen(t.amount)}</div>
+        <button class="entry-del" data-del="${esc(t.id)}" aria-label="削除">🗑</button>
+      </div>`;
+    }).join('');
+    return `<div class="section-head">${esc(title)}</div><div class="card">${rows || '<div class="empty">まだ記録がありません</div>'}</div>`;
+  }
+
+  function bindDelete() {
+    mainEl.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+      const t = data.txns.find(x => x.id === b.dataset.del);
+      if (!t) return;
+      confirmBox(`${shortDate(t.date)} ${yen(t.amount)} の記録を削除しますか？`, () => { deleteTxn(t.id); render(); toast('削除しました'); });
+    });
+  }
+
+  // ---------- 出費 ----------
+  function renderExpense() {
+    const s = ui.expense;
+    const cards = accountsByRole('card');
+    if (!cards.find(c => c.name === s.card)) s.card = cards[0] ? cards[0].name : '';
+    if (s.method === 'card' && !cards.length) s.method = 'cash';
+    const expenses = accountsOf('expense').map(a => a.name);
+    if (s.account && !acc(s.account)) s.account = '';
+
+    mainEl.innerHTML = `
+      <div class="screen-title">出費を入力</div>
+      <div class="card">
+        <div class="field">
+          <label class="label">支払い方法</label>
+          <div class="toggle">
+            <button id="mCash" class="${s.method === 'cash' ? 'on-cash' : ''}">💴 現金</button>
+            <button id="mCard" class="${s.method === 'card' ? 'on-card' : ''}">💳 カード</button>
+          </div>
+          ${s.method === 'card' && cards.length > 1 ? `<div style="margin-top:10px">${chipsHtml(cards.map(c => c.name), s.card, 'card')}</div>` : ''}
+        </div>
+        <div class="field">
+          <label class="label">勘定科目</label>
+          ${chipsHtml(expenses, s.account, 'acc', '科目を追加')}
+          ${s.adding ? addRowHtml('新しい費用の科目名 (例: ペット費)') : ''}
+        </div>
+        ${commonFieldsHtml('ex')}
+        <button class="btn-primary" id="exSave">登録する</button>
+      </div>
+      ${recentHtml(['exp_cash', 'exp_card'], '最近の出費')}`;
+
+    $('mCash').onclick = () => { s.method = 'cash'; render(); };
+    $('mCard').onclick = () => {
+      if (!cards.length) { toast('設定でクレジットカードを登録してください'); return; }
+      s.method = 'card'; render();
+    };
+    mainEl.querySelectorAll('[data-card]').forEach(b => b.onclick = () => { s.card = b.dataset.card; render(); });
+    mainEl.querySelectorAll('[data-acc]').forEach(b => b.onclick = () => { s.account = b.dataset.acc; render(); });
+    bindAddAccount(s, (name) => {
+      const a = addAccount(name, 'expense');
+      if (a && a.type !== 'expense') { toast(`「${name}」は${TYPES[a.type]}の科目です`); return null; }
+      if (a) s.account = a.name;
+      return a;
+    });
+    $('exSave').onclick = () => {
+      if (!s.account) { toast('勘定科目を選んでください'); return; }
+      const c = readCommon('ex'); if (!c) return;
+      let credit;
+      if (s.method === 'cash') {
+        const cash = accountsByRole('cash')[0];
+        if (!cash) { toast('現金の科目がありません'); return; }
+        credit = cash.name;
+      } else {
+        credit = s.card;
+      }
+      addTxn({ kind: s.method === 'cash' ? 'exp_cash' : 'exp_card', date: c.date, debit: s.account, credit, amount: c.amount, memo: c.memo });
+      toast(`${s.account} ${yen(c.amount)} を登録しました`);
+      render();
+    };
+    bindDelete();
+  }
+
+  function bankChipsHtml(state) {
+    const banks = accountsByRole('bank');
+    if (!banks.find(b => b.name === state.bank)) state.bank = banks[0] ? banks[0].name : '';
+    if (banks.length <= 1) return '';
+    return `<div class="field"><label class="label">口座</label>${chipsHtml(banks.map(b => b.name), state.bank, 'bank')}</div>`;
+  }
+
+  // ---------- 銀行入金 ----------
+  function renderDeposit() {
+    const s = ui.deposit;
+    const bankHtml = bankChipsHtml(s);
+    if (!s.bank) { mainEl.innerHTML = '<div class="screen-title">銀行入金</div><div class="card empty">設定で銀行口座を登録してください</div>'; return; }
+    const cash = accountsByRole('cash')[0];
+    const options = [];
+    if (cash) options.push({ key: cash.name, label: '現金から預け入れ' });
+    accountsOf('income').forEach(a => options.push({ key: a.name, label: a.name }));
+    if (s.from && !acc(s.from)) s.from = '';
+
+    mainEl.innerHTML = `
+      <div class="screen-title">銀行入金</div>
+      <div class="card">
+        ${bankHtml}
+        <div class="field">
+          <label class="label">入金の内容(勘定科目)</label>
+          <div class="chips">
+            ${options.map(o => `<button class="chip${o.key === s.from ? ' on' : ''}" data-from="${esc(o.key)}">${esc(o.label)}</button>`).join('')}
+            <button class="chip add" data-add="1">＋ 科目を追加</button>
+          </div>
+          ${s.adding ? addRowHtml('新しい収入の科目名 (例: 副業収入)') : ''}
+        </div>
+        ${commonFieldsHtml('dp')}
+        <button class="btn-primary" id="dpSave">入金を登録</button>
+      </div>
+      ${recentHtml(['deposit'], '最近の入金')}`;
+
+    mainEl.querySelectorAll('[data-bank]').forEach(b => b.onclick = () => { s.bank = b.dataset.bank; render(); });
+    mainEl.querySelectorAll('[data-from]').forEach(b => b.onclick = () => { s.from = b.dataset.from; render(); });
+    bindAddAccount(s, (name) => {
+      const a = addAccount(name, 'income');
+      if (a && a.type !== 'income') { toast(`「${name}」は${TYPES[a.type]}の科目です`); return null; }
+      if (a) s.from = a.name;
+      return a;
+    });
+    $('dpSave').onclick = () => {
+      if (!s.from) { toast('入金の内容を選んでください'); return; }
+      const c = readCommon('dp'); if (!c) return;
+      addTxn({ kind: 'deposit', date: c.date, debit: s.bank, credit: s.from, amount: c.amount, memo: c.memo });
+      toast(`入金 ${yen(c.amount)} を登録しました`);
+      render();
+    };
+    bindDelete();
+  }
+
+  // ---------- 銀行出金 ----------
+  function renderWithdraw() {
+    const s = ui.withdraw;
+    const bankHtml = bankChipsHtml(s);
+    if (!s.bank) { mainEl.innerHTML = '<div class="screen-title">銀行出金</div><div class="card empty">設定で銀行口座を登録してください</div>'; return; }
+    const cash = accountsByRole('cash')[0];
+    const options = [];
+    if (cash) options.push({ key: cash.name, label: '現金で引き出し' });
+    accountsByRole('card').forEach(c => options.push({ key: c.name, label: `${c.name} 引き落とし` }));
+    const expenseOptions = accountsOf('expense').map(a => ({ key: a.name, label: a.name }));
+    if (s.to && !acc(s.to)) s.to = '';
+    const chip = (o) => `<button class="chip${o.key === s.to ? ' on' : ''}" data-to="${esc(o.key)}">${esc(o.label)}</button>`;
+
+    mainEl.innerHTML = `
+      <div class="screen-title">銀行出金</div>
+      <div class="card">
+        ${bankHtml}
+        <div class="field">
+          <label class="label">出金の内容</label>
+          <div class="chips">${options.map(chip).join('')}</div>
+        </div>
+        <div class="field">
+          <label class="label">口座から直接支払い(勘定科目)</label>
+          <div class="chips">
+            ${expenseOptions.map(chip).join('')}
+            <button class="chip add" data-add="1">＋ 科目を追加</button>
+          </div>
+          ${s.adding ? addRowHtml('新しい費用の科目名 (例: 家賃)') : ''}
+        </div>
+        ${commonFieldsHtml('wd')}
+        <button class="btn-primary" id="wdSave">出金を登録</button>
+      </div>
+      ${recentHtml(['withdraw', 'exp_bank'], '最近の出金')}`;
+
+    mainEl.querySelectorAll('[data-bank]').forEach(b => b.onclick = () => { s.bank = b.dataset.bank; render(); });
+    mainEl.querySelectorAll('[data-to]').forEach(b => b.onclick = () => { s.to = b.dataset.to; render(); });
+    bindAddAccount(s, (name) => {
+      const a = addAccount(name, 'expense');
+      if (a && a.type !== 'expense') { toast(`「${name}」は${TYPES[a.type]}の科目です`); return null; }
+      if (a) s.to = a.name;
+      return a;
+    });
+    $('wdSave').onclick = () => {
+      if (!s.to) { toast('出金の内容を選んでください'); return; }
+      const c = readCommon('wd'); if (!c) return;
+      const kind = acc(s.to).type === 'expense' ? 'exp_bank' : 'withdraw';
+      addTxn({ kind, date: c.date, debit: s.to, credit: s.bank, amount: c.amount, memo: c.memo });
+      toast(`出金 ${yen(c.amount)} を登録しました`);
+      render();
+    };
+    bindDelete();
+  }
+
+  // ---------- 損益計算書 ----------
+  function renderPL() {
+    const s = ui.pl;
+    let from, to, label;
+    if (s.mode === 'month') {
+      const last = new Date(s.year, s.month, 0).getDate();
+      from = `${s.year}-${String(s.month).padStart(2, '0')}-01`;
+      to = `${s.year}-${String(s.month).padStart(2, '0')}-${last}`;
+      label = `${s.year}年${s.month}月`;
+    } else {
+      from = `${s.year}-01-01`; to = `${s.year}-12-31`; label = `${s.year}年(1月〜12月)`;
+    }
+    const m = sums(from, to);
+    const rows = (type, sign) => accountsOf(type)
+      .map(a => ({ name: a.name, v: (m[a.name] || 0) * sign }))
+      .filter(r => r.v !== 0)
+      .sort((a, b) => b.v - a.v);
+    const inc = rows('income', -1), exp = rows('expense', 1);
+    const incTotal = inc.reduce((x, r) => x + r.v, 0), expTotal = exp.reduce((x, r) => x + r.v, 0);
+    const net = incTotal - expTotal;
+    const list = (rs) => rs.length ? rs.map(r => `<div class="report-row"><span>${esc(r.name)}</span><span class="v">${yen(r.v)}</span></div>`).join('') : '<div class="empty">なし</div>';
+
+    mainEl.innerHTML = `
+      <div class="screen-title">損益計算書</div>
+      <div class="toggle" style="margin-bottom:12px">
+        <button id="plMonth" class="${s.mode === 'month' ? 'on' : ''}">月</button>
+        <button id="plYear" class="${s.mode === 'year' ? 'on' : ''}">年</button>
+      </div>
+      <div class="period">
+        <button class="icon-btn" id="plPrev">◀</button>
+        <div class="label-big">${label}</div>
+        <button class="icon-btn" id="plNext">▶</button>
+      </div>
+      <div class="card result-box">
+        <div class="cap">${net >= 0 ? '当期純利益(黒字)' : '当期純損失(赤字)'}</div>
+        <div class="num ${net >= 0 ? 'plus' : 'minus'}">${yen(net)}</div>
+      </div>
+      <div class="card">
+        <div class="report-head">収益</div>
+        ${list(inc)}
+        <div class="report-total"><span>収益合計</span><span class="plus">${yen(incTotal)}</span></div>
+      </div>
+      <div class="card">
+        <div class="report-head">費用</div>
+        ${list(exp)}
+        <div class="report-total"><span>費用合計</span><span class="minus">${yen(expTotal)}</span></div>
+      </div>
+      <p class="note">※ 現金からの預け入れ・引き出しやカードの引き落としは、お金の置き場所が変わるだけなので損益には入りません。</p>`;
+
+    $('plMonth').onclick = () => { s.mode = 'month'; render(); };
+    $('plYear').onclick = () => { s.mode = 'year'; render(); };
+    const move = (d) => {
+      if (s.mode === 'year') s.year += d;
+      else { s.month += d; if (s.month < 1) { s.month = 12; s.year--; } if (s.month > 12) { s.month = 1; s.year++; } }
+      render();
+    };
+    $('plPrev').onclick = () => move(-1);
+    $('plNext').onclick = () => move(1);
+  }
+
+  // ---------- 貸借対照表 ----------
+  function renderBS() {
+    const s = ui.bs;
+    const m = sums(null, s.date);
+    const rows = (type, sign) => accountsOf(type)
+      .map(a => ({ name: a.name, role: a.role, v: (m[a.name] || 0) * sign }))
+      .filter(r => r.v !== 0 || r.role);
+    const assets = rows('asset', 1), liabs = rows('liability', -1), equity = rows('equity', -1);
+    let profit = 0;
+    accountsOf('income').forEach(a => profit -= (m[a.name] || 0));
+    accountsOf('expense').forEach(a => profit -= (m[a.name] || 0));
+    const total = (rs) => rs.reduce((x, r) => x + r.v, 0);
+    const aT = total(assets), lT = total(liabs), eT = total(equity) + profit;
+    const list = (rs) => rs.length ? rs.map(r => `<div class="report-row"><span>${esc(r.name)}</span><span class="v${r.v < 0 ? ' minus' : ''}">${yen(r.v)}</span></div>`).join('') : '<div class="empty">なし</div>';
+
+    mainEl.innerHTML = `
+      <div class="screen-title">貸借対照表</div>
+      <div class="field">
+        <label class="label">基準日</label>
+        <input class="input" type="date" id="bsDate" value="${s.date}">
+      </div>
+      <div class="card result-box">
+        <div class="cap">純資産(資産 − 負債)</div>
+        <div class="num ${aT - lT >= 0 ? 'plus' : 'minus'}">${yen(aT - lT)}</div>
+      </div>
+      <div class="card">
+        <div class="report-head">資産</div>
+        ${list(assets)}
+        <div class="report-total"><span>資産合計</span><span>${yen(aT)}</span></div>
+      </div>
+      <div class="card">
+        <div class="report-head">負債</div>
+        ${list(liabs)}
+        <div class="report-total"><span>負債合計</span><span>${yen(lT)}</span></div>
+      </div>
+      <div class="card">
+        <div class="report-head">純資産</div>
+        ${list(equity)}
+        <div class="report-row"><span>これまでの損益の累計</span><span class="v${profit < 0 ? ' minus' : ''}">${yen(profit)}</span></div>
+        <div class="report-total"><span>純資産合計</span><span>${yen(eT)}</span></div>
+      </div>
+      <div class="card">
+        <div class="report-row"><span>負債・純資産合計</span><span class="v">${yen(lT + eT)}</span></div>
+        <div class="report-row"><span>資産合計</span><span class="v">${yen(aT)}</span></div>
+      </div>
+      <p class="note">※ アプリを使い始めた時点の現金・預金・カード残高は、設定の「開始残高」で入力すると正しい金額になります。</p>`;
+
+    $('bsDate').onchange = (e) => { s.date = e.target.value || today(); render(); };
+  }
+
+  // ---------- 設定 ----------
+  function renderSettings() {
+    const used = new Set();
+    data.txns.forEach(t => { used.add(t.debit); used.add(t.credit); });
+    const groups = ['asset', 'liability', 'equity', 'income', 'expense'].map(type => {
+      const rows = accountsOf(type).map(a => `
+        <div class="entry">
+          <div class="entry-main"><div class="entry-title">${a.role ? `<span class="tag tag-${a.role === 'card' ? 'card' : a.role === 'cash' ? 'cash' : 'bank'}">${ROLES[a.role]}</span>` : ''}${esc(a.name)}</div></div>
+          ${used.has(a.name) || a.name === OPENING_ACCOUNT || a.role === 'cash' ? '<span class="muted">使用中</span>' : `<button class="entry-del" data-delacc="${esc(a.name)}" aria-label="削除">🗑</button>`}
+        </div>`).join('');
+      return `<div class="report-head" style="margin-top:10px">${TYPES[type]}</div>${rows || '<div class="empty">なし</div>'}`;
+    }).join('');
+
+    const openingRows = data.accounts.filter(a => a.role).map(a => {
+      const t = data.txns.find(x => x.kind === 'opening' && (x.debit === a.name || x.credit === a.name));
+      const v = t ? t.amount : '';
+      return `<div class="field"><label class="label">${esc(a.name)}${a.role === 'card' ? '(未払い残高)' : ''}</label>
+        <div class="amount-wrap"><input class="input amount-input" style="font-size:20px" inputmode="numeric" data-open="${esc(a.name)}" value="${v}" placeholder="0"></div></div>`;
+    }).join('');
+    const openingDate = (data.txns.find(x => x.kind === 'opening') || {}).date || today();
+
+    const sheetUrl = sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit` : '';
+
+    mainEl.innerHTML = `
+      <div class="screen-title">設定</div>
+
+      <div class="section-head">Google ドライブ(スプレッドシート)</div>
+      <div class="card">
+        <p class="note" id="syncText" style="margin-top:0"></p>
+        <div class="field" style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" id="signInBtn">Googleでサインイン</button>
+          <button class="btn" id="signOutBtn">サインアウト</button>
+          <button class="btn" id="syncNowBtn">今すぐ保存</button>
+          <button class="btn" id="pullBtn">シートから読み込む</button>
+        </div>
+        ${sheetUrl ? `<div class="field"><a class="btn" style="display:inline-block;text-decoration:none" href="${sheetUrl}" target="_blank" rel="noopener">📄 スプレッドシートを開く</a></div>` : ''}
+        <div class="field">
+          <label class="label">保存先フォルダ(GoogleドライブのフォルダURL)</label>
+          <input class="input" id="folderInput" style="font-size:14px" placeholder="未指定ならマイドライブ直下" value="${esc(localStorage.getItem(FOLDER_KEY) || '')}">
+          <div style="margin-top:8px"><button class="btn" id="folderSave">保存先を設定</button></div>
+          <p class="note">ファイル名「${SHEET_FILE_NAME}」で保存されます。Googleドライブ上で好きなフォルダへ移動しても、そのまま使い続けられます。</p>
+        </div>
+      </div>
+
+      <div class="section-head">勘定科目</div>
+      <div class="card">
+        <div class="field">
+          <label class="label">新しい科目を追加</label>
+          <input class="input" id="saName" placeholder="科目名" maxlength="30">
+          <select class="input" id="saType" style="margin-top:8px">
+            <option value="expense">費用(出費の科目)</option>
+            <option value="income">収益(入金の科目)</option>
+            <option value="bank">銀行口座</option>
+            <option value="card">クレジットカード</option>
+            <option value="asset">その他の資産</option>
+            <option value="liability">その他の負債(ローンなど)</option>
+          </select>
+          <div style="margin-top:8px"><button class="btn" id="saAdd">追加</button></div>
+        </div>
+        ${groups}
+      </div>
+
+      <div class="section-head">開始残高(使い始めた日の残高)</div>
+      <div class="card">
+        <div class="field"><label class="label">基準日</label><input class="input" type="date" id="openDate" value="${openingDate}"></div>
+        ${openingRows}
+        <button class="btn-primary" id="openSave">開始残高を保存</button>
+      </div>
+      <p class="note">データはこの端末とGoogleスプレッドシートに保存されます。</p>`;
+
+    updateSyncStatusUI();
+    $('signInBtn').onclick = signIn;
+    $('signOutBtn').onclick = signOut;
+    $('syncNowBtn').onclick = () => { if (!accessToken) { toast('先にサインインしてください'); return; } flushSheetSync(); };
+    $('pullBtn').onclick = () => {
+      if (!accessToken || !sheetId) { toast('先にサインインしてください'); return; }
+      confirmBox('スプレッドシートの内容でこの端末のデータを置き換えますか？\n(シートを直接編集したときに使います)', () => pullFromSheet(true));
+    };
+    $('folderSave').onclick = () => setFolder($('folderInput').value.trim());
+
+    $('saAdd').onclick = () => {
+      const name = $('saName').value.trim();
+      const v = $('saType').value;
+      if (!name) { toast('科目名を入力してください'); return; }
+      if (acc(name)) { toast(`「${name}」は既にあります`); return; }
+      if (v === 'bank') addAccount(name, 'asset', 'bank');
+      else if (v === 'card') addAccount(name, 'liability', 'card');
+      else addAccount(name, v);
+      toast(`「${name}」を追加しました`);
+      render();
+    };
+    mainEl.querySelectorAll('[data-delacc]').forEach(b => b.onclick = () => {
+      const name = b.dataset.delacc;
+      confirmBox(`科目「${name}」を削除しますか？`, () => {
+        data.accounts = data.accounts.filter(a => a.name !== name);
+        saveData(); render(); toast('削除しました');
+      });
+    });
+
+    $('openSave').onclick = () => {
+      const date = $('openDate').value || today();
+      if (!acc(OPENING_ACCOUNT)) data.accounts.push({ name: OPENING_ACCOUNT, type: 'equity', role: '' });
+      const next = data.txns.filter(t => t.kind !== 'opening');
+      for (const input of mainEl.querySelectorAll('[data-open]')) {
+        const raw = input.value.trim();
+        if (!raw) continue;
+        const v = parseAmount(raw);
+        if (!Number.isFinite(v)) { toast('金額の形式が正しくありません'); return; }
+        if (!v) continue;
+        const a = acc(input.dataset.open);
+        const isLiab = a.type === 'liability';
+        // 資産は (借)資産/(貸)元入金、負債は (借)元入金/(貸)負債。マイナス入力は逆仕訳にする
+        let debit = isLiab ? OPENING_ACCOUNT : a.name, credit = isLiab ? a.name : OPENING_ACCOUNT;
+        if (v < 0) [debit, credit] = [credit, debit];
+        next.push({ id: newId(), kind: 'opening', date, debit, credit, amount: Math.abs(v), memo: '開始残高', createdAt: Date.now() });
+      }
+      data.txns = next;
+      saveData();
+      toast('開始残高を保存しました');
+      render();
+    };
+  }
+
+  // ============================================================
+  //  Google スプレッドシート同期
+  // ============================================================
+  const GOOGLE_CLIENT_ID = '714202952870-hf8no72rpvh31nrpddqnpl77ibjsj3hc.apps.googleusercontent.com';
+  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+  const SHEET_FILE_NAME = '家計簿データ';
+  const SHEET_ID_KEY = 'kakeiboSheetId_v1';
+  const FOLDER_KEY = 'kakeiboFolder_v1';
+  const SH_TX = '取引', SH_ACC = '勘定科目', SH_META = '設定';
+  const TX_HEADER = ['ID', '日付', '区分', '借方科目', '貸方科目', '金額', '摘要', '登録日時'];
+  const ACC_HEADER = ['科目名', '分類', '種別', '借方合計', '貸方合計', '残高'];
+
+  let syncState = 'signed_out'; // 'signed_out' | 'idle' | 'syncing' | 'error'
+  let accessToken = null;
+  let sheetId = localStorage.getItem(SHEET_ID_KEY);
+  let pendingUpload = false;
+  let syncTimer = null;
+  let gisTokenClient = null;
+  let lastSyncedAt = null;
+  let lastError = '';
+
+  function isAndroidBridge() {
+    return !!(window.AndroidBridge && typeof window.AndroidBridge.isAndroidApp === 'function' && window.AndroidBridge.isAndroidApp());
+  }
+
+  function setSyncState(state) {
+    syncState = state;
+    updateSyncStatusUI();
+  }
+
+  function updateSyncStatusUI() {
+    const dot = $('syncDot');
+    dot.className = 'sync-dot ' + syncState;
+    let text = '';
+    if (syncState === 'signed_out') text = 'Googleと未連携です(データはこの端末にだけ保存されています)';
+    else if (syncState === 'syncing') text = '保存中…';
+    else if (syncState === 'error') text = navigator.onLine ? '保存エラー: ' + (lastError || '時間をおいて再度お試しください') : 'オフライン - オンラインに戻ったら自動で保存します';
+    else if (syncState === 'idle') text = lastSyncedAt ? `スプレッドシートに保存済み(${new Date(lastSyncedAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })})` : '連携済み';
+    dot.title = text;
+    const t = $('syncText');
+    if (t) {
+      t.textContent = text;
+      $('signInBtn').classList.toggle('hidden', syncState !== 'signed_out');
+      $('signOutBtn').classList.toggle('hidden', syncState === 'signed_out');
+    }
+  }
+
+  function loadGisScript(callback) {
+    if (window.google && window.google.accounts && window.google.accounts.oauth2) { callback(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.onload = callback;
+    s.onerror = () => { lastError = 'Googleに接続できません'; setSyncState('error'); };
+    document.head.appendChild(s);
+  }
+
+  function onSignedIn(token) {
+    accessToken = token;
+    setSyncState('idle');
+    pullFromSheet(false);
+  }
+
+  function initSync() {
+    if (isAndroidBridge()) {
+      window.onAndroidAuthToken = onSignedIn;
+      window.onAndroidAuthFailed = () => setSyncState('signed_out');
+      window.AndroidBridge.requestToken();
+    } else {
+      loadGisScript(() => {
+        gisTokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_CLIENT_ID,
+          scope: DRIVE_SCOPE,
+          callback: (resp) => {
+            if (resp && resp.access_token) onSignedIn(resp.access_token);
+            else setSyncState('signed_out');
+          }
+        });
+        // 一度サインインしたことがあれば、起動時に無音でサインインを試みる
+        if (localStorage.getItem('kakeiboSignedIn_v1')) gisTokenClient.requestAccessToken({ prompt: '' });
+      });
+    }
+  }
+
+  function signIn() {
+    localStorage.setItem('kakeiboSignedIn_v1', '1');
+    if (isAndroidBridge()) { window.AndroidBridge.startSignIn(); return; }
+    if (!gisTokenClient) { initSync(); return; }
+    gisTokenClient.callback = (resp) => {
+      if (resp && resp.access_token) onSignedIn(resp.access_token);
+      else setSyncState('signed_out');
+    };
+    gisTokenClient.requestAccessToken({ prompt: 'consent' });
+  }
+
+  function signOut() {
+    const oldToken = accessToken;
+    accessToken = null;
+    sheetId = null;
+    localStorage.removeItem(SHEET_ID_KEY);
+    localStorage.removeItem('kakeiboSignedIn_v1');
+    setSyncState('signed_out');
+    if (isAndroidBridge()) window.AndroidBridge.signOut();
+    else if (window.google && oldToken) google.accounts.oauth2.revoke(oldToken, () => {});
+    render();
+  }
+
+  function silentReauth() {
+    return new Promise((resolve) => {
+      if (isAndroidBridge()) {
+        window.onAndroidAuthToken = (token) => { accessToken = token; resolve(true); };
+        window.onAndroidAuthFailed = () => resolve(false);
+        window.AndroidBridge.requestToken();
+      } else if (gisTokenClient) {
+        gisTokenClient.callback = (resp) => {
+          if (resp && resp.access_token) { accessToken = resp.access_token; resolve(true); }
+          else resolve(false);
+        };
+        gisTokenClient.requestAccessToken({ prompt: '' });
+      } else resolve(false);
+    });
+  }
+
+  async function api(url, options) {
+    options = Object.assign({}, options || {});
+    const call = () => {
+      options.headers = Object.assign({}, options.headers, { Authorization: 'Bearer ' + accessToken });
+      return fetch(url, options);
+    };
+    let res = await call();
+    if (res.status === 401 && await silentReauth()) res = await call();
+    return res;
+  }
+
+  async function apiJson(url, options) {
+    if (options && options.json !== undefined) {
+      options = Object.assign({}, options, { body: JSON.stringify(options.json), headers: { 'Content-Type': 'application/json; charset=UTF-8' } });
+      delete options.json;
+    }
+    const res = await api(url, options);
+    let body = null;
+    try { body = await res.json(); } catch (e) {}
+    if (!res.ok) {
+      const err = new Error((body && body.error && body.error.message) || ('HTTP ' + res.status));
+      err.status = res.status;
+      throw err;
+    }
+    return body;
+  }
+
+  const DRIVE = 'https://www.googleapis.com/drive/v3';
+  const SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets';
+
+  function folderIdFrom(s) {
+    if (!s) return '';
+    const m = s.match(/folders\/([A-Za-z0-9_-]+)/) || s.match(/[?&]id=([A-Za-z0-9_-]+)/);
+    if (m) return m[1];
+    return /^[A-Za-z0-9_-]{10,}$/.test(s) ? s : '';
+  }
+
+  async function findSheet() {
+    const q = encodeURIComponent(`name='${SHEET_FILE_NAME}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
+    const r = await apiJson(`${DRIVE}/files?q=${q}&spaces=drive&fields=files(id)&orderBy=modifiedTime desc`);
+    return (r.files && r.files[0]) ? r.files[0].id : null;
+  }
+
+  async function createSheet() {
+    const meta = { name: SHEET_FILE_NAME, mimeType: 'application/vnd.google-apps.spreadsheet' };
+    const folder = folderIdFrom(localStorage.getItem(FOLDER_KEY) || '');
+    let r;
+    if (folder) {
+      try {
+        r = await apiJson(`${DRIVE}/files?fields=id`, { method: 'POST', json: Object.assign({ parents: [folder] }, meta) });
+      } catch (e) {
+        toast('指定フォルダに作れなかったため、マイドライブに作成しました');
+      }
+    }
+    if (!r) r = await apiJson(`${DRIVE}/files?fields=id`, { method: 'POST', json: meta });
+    sheetId = r.id;
+    localStorage.setItem(SHEET_ID_KEY, sheetId);
+    await ensureTabs();
+    return sheetId;
+  }
+
+  // 必要なシート(タブ)が揃っていなければ作る
+  async function ensureTabs() {
+    const r = await apiJson(`${SHEETS}/${sheetId}?fields=sheets.properties(sheetId,title)`);
+    const sheets = r.sheets.map(s => s.properties);
+    const titles = sheets.map(s => s.title);
+    const need = [SH_TX, SH_ACC, SH_META].filter(t => !titles.includes(t));
+    if (!need.length) return;
+    const requests = [];
+    if (sheets.length === 1 && ![SH_TX, SH_ACC, SH_META].includes(sheets[0].title)) {
+      requests.push({ updateSheetProperties: { properties: { sheetId: sheets[0].sheetId, title: need.shift() }, fields: 'title' } });
+    }
+    need.forEach(title => requests.push({ addSheet: { properties: { title } } }));
+    await apiJson(`${SHEETS}/${sheetId}:batchUpdate`, { method: 'POST', json: { requests } });
+  }
+
+  async function getOrCreateSheet() {
+    if (sheetId) return sheetId;
+    const found = await findSheet();
+    if (found) {
+      sheetId = found;
+      localStorage.setItem(SHEET_ID_KEY, sheetId);
+      await ensureTabs();
+      return sheetId;
+    }
+    return createSheet();
+  }
+
+  const typeKey = (label) => Object.keys(TYPES).find(k => TYPES[k] === label) || 'expense';
+  const roleKey = (label) => Object.keys(ROLES).find(k => ROLES[k] === label) || '';
+  const kindKey = (label) => Object.keys(KINDS).find(k => KINDS[k] === label) || 'exp_cash';
+
+  function cellDate(v) {
+    if (typeof v === 'number') { // シートで日付として入力された場合のシリアル値
+      const d = new Date(Math.round((v - 25569) * 86400000));
+      return d.toISOString().slice(0, 10);
+    }
+    return String(v || '').trim().replace(/\//g, '-').replace(/-(\d)(?=-|$)/g, '-0$1');
+  }
+
+  async function readSheet() {
+    const ranges = [`'${SH_TX}'!A2:H`, `'${SH_ACC}'!A2:C`, `'${SH_META}'!B1`].map(encodeURIComponent).join('&ranges=');
+    const r = await apiJson(`${SHEETS}/${sheetId}/values:batchGet?ranges=${ranges}&valueRenderOption=UNFORMATTED_VALUE`);
+    const [tx, ac, meta] = r.valueRanges.map(v => v.values || []);
+    const updatedAt = Number(meta[0] && meta[0][0]) || 0;
+    const accounts = ac.filter(row => row[0]).map(row => ({ name: String(row[0]).trim(), type: typeKey(row[1]), role: roleKey(row[2]) }));
+    const txns = tx.filter(row => row[3] && row[4] && row[5]).map((row, i) => ({
+      id: String(row[0] || ('s' + i + Date.now().toString(36))),
+      date: cellDate(row[1]),
+      kind: kindKey(row[2]),
+      debit: String(row[3]).trim(),
+      credit: String(row[4]).trim(),
+      amount: Math.round(Number(row[5]) || 0),
+      memo: String(row[6] || ''),
+      createdAt: Number(row[7]) || Date.parse(String(row[7] || '')) || 0
+    })).filter(t => t.amount > 0);
+    // シートで直接書いた科目が勘定科目シートに無い場合は費用として補う
+    txns.forEach(t => [t.debit, t.credit].forEach(n => {
+      if (!accounts.find(a => a.name === n)) accounts.push({ name: n, type: 'expense', role: '' });
+    }));
+    return { updatedAt, accounts, txns, empty: !accounts.length && !txns.length };
+  }
+
+  async function writeSheet() {
+    await ensureTabs();
+    const txRows = [TX_HEADER].concat(
+      data.txns.slice().sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt)
+        .map(t => [t.id, t.date, KINDS[t.kind] || t.kind, t.debit, t.credit, t.amount, t.memo || '', new Date(t.createdAt || 0).toLocaleString('ja-JP')])
+    );
+    const q = (s) => `'${s}'`;
+    const accRows = [ACC_HEADER].concat(data.accounts.map((a, i) => {
+      const r = i + 2;
+      return [a.name, TYPES[a.type], ROLES[a.role] || '',
+        `=SUMIFS(${q(SH_TX)}!$F:$F,${q(SH_TX)}!$D:$D,$A${r})`,
+        `=SUMIFS(${q(SH_TX)}!$F:$F,${q(SH_TX)}!$E:$E,$A${r})`,
+        `=IF(OR($B${r}="資産",$B${r}="費用"),D${r}-E${r},E${r}-D${r})`];
+    }));
+    await apiJson(`${SHEETS}/${sheetId}/values:batchClear`, {
+      method: 'POST', json: { ranges: [`'${SH_TX}'!A:H`, `'${SH_ACC}'!A:F`, `'${SH_META}'!A:B`] }
+    });
+    await apiJson(`${SHEETS}/${sheetId}/values:batchUpdate`, {
+      method: 'POST', json: {
+        valueInputOption: 'RAW',
+        data: [
+          { range: `'${SH_TX}'!A1`, values: txRows },
+          { range: `'${SH_ACC}'!A1`, values: accRows.map(r => r.slice(0, 3)) },
+          { range: `'${SH_META}'!A1`, values: [['最終更新', data.updatedAt], ['最終更新(表示用)', new Date(data.updatedAt || Date.now()).toLocaleString('ja-JP')], ['アプリ', '家計簿 v1']] }
+        ]
+      }
+    });
+    await apiJson(`${SHEETS}/${sheetId}/values:batchUpdate`, {
+      method: 'POST', json: { valueInputOption: 'USER_ENTERED', data: [{ range: `'${SH_ACC}'!D1`, values: accRows.map(r => r.slice(3)) }] }
+    });
+  }
+
+  function errorText(e) {
+    if (e && e.status === 403 && /Sheets API|sheets\.googleapis/i.test(e.message)) return 'Google Sheets API が有効になっていません';
+    return (e && e.message) || '不明なエラー';
+  }
+
+  let busy = false;
+
+  // シートの内容を取り込む(force=false なら新しい方を採用)
+  async function pullFromSheet(force) {
+    if (!accessToken || busy) return;
+    busy = true;
+    try {
+      setSyncState('syncing');
+      await getOrCreateSheet();
+      await ensureTabs().catch(() => {});
+      let remote;
+      try {
+        remote = await readSheet();
+      } catch (e) {
+        if (e.status === 404) { // シートが削除されていたら作り直す
+          sheetId = null; localStorage.removeItem(SHEET_ID_KEY);
+          await getOrCreateSheet();
+          remote = await readSheet();
+        } else throw e;
+      }
+      if (!remote.empty && (force || remote.updatedAt > (data.updatedAt || 0))) {
+        data = { updatedAt: force ? Date.now() : remote.updatedAt, accounts: remote.accounts, txns: remote.txns };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        if (force) await writeSheet(); // 最終更新を揃えておく
+        render();
+        if (force) toast('スプレッドシートから読み込みました');
+      } else if (remote.empty || remote.updatedAt < (data.updatedAt || 0) || pendingUpload) {
+        await writeSheet();
+        pendingUpload = false;
+      }
+      lastSyncedAt = Date.now();
+      setSyncState('idle');
+      if (ui.settingsOpen) render();
+    } catch (e) {
+      lastError = errorText(e);
+      setSyncState('error');
+    } finally {
+      busy = false;
+    }
+  }
+
+  function scheduleSheetSync() {
+    pendingUpload = true;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(flushSheetSync, 1500);
+  }
+
+  async function flushSheetSync() {
+    clearTimeout(syncTimer);
+    if (!accessToken) { pendingUpload = true; return; }
+    if (!navigator.onLine) { pendingUpload = true; setSyncState('error'); return; }
+    if (busy) { syncTimer = setTimeout(flushSheetSync, 1500); return; }
+    busy = true;
+    try {
+      setSyncState('syncing');
+      await getOrCreateSheet();
+      try {
+        await writeSheet();
+      } catch (e) {
+        if (e.status !== 404) throw e;
+        sheetId = null; localStorage.removeItem(SHEET_ID_KEY);
+        await getOrCreateSheet();
+        await writeSheet();
+      }
+      pendingUpload = false;
+      lastSyncedAt = Date.now();
+      setSyncState('idle');
+      if (ui.settingsOpen) render();
+    } catch (e) {
+      lastError = errorText(e);
+      setSyncState('error');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function setFolder(input) {
+    if (input && !folderIdFrom(input)) { toast('フォルダのURLを貼り付けてください'); return; }
+    localStorage.setItem(FOLDER_KEY, input);
+    const folder = folderIdFrom(input);
+    if (!folder) { toast('保存先をマイドライブにしました(次に新しく作るとき)'); return; }
+    if (!accessToken || !sheetId) { toast('保存先を設定しました。サインイン後にそこへ作成します'); return; }
+    try {
+      const f = await apiJson(`${DRIVE}/files/${sheetId}?fields=parents`);
+      const remove = (f.parents || []).join(',');
+      await apiJson(`${DRIVE}/files/${sheetId}?addParents=${folder}&removeParents=${remove}&fields=id`, { method: 'PATCH', json: {} });
+      toast('スプレッドシートを指定フォルダへ移動しました');
+    } catch (e) {
+      confirmBox('アプリからはそのフォルダへ移動できませんでした。\nGoogleドライブで「家計簿データ」を選び、「移動」で指定フォルダへ移してください。移動後もそのまま使えます。', () => {});
+    }
+  }
+
+  window.addEventListener('online', () => { if (pendingUpload) flushSheetSync(); });
+  // 他の端末で記録した内容を、アプリを開き直したときに取り込む
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && accessToken) {
+      if (pendingUpload) flushSheetSync(); else pullFromSheet(false);
+    }
+  });
+
+  // ============================================================
+  //  起動
+  // ============================================================
+  if (!localStorage.getItem(STORAGE_KEY)) localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  render();
+  initSync();
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('kakeibo-sw.js').catch(() => {});
+  }
+</script>
+</body>
+</html>

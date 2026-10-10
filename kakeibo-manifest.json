@@ -1,0 +1,13 @@
+{
+  "name": "家計簿",
+  "short_name": "家計簿",
+  "start_url": "kakeibo.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#faf7f2",
+  "theme_color": "#2f4f6f",
+  "lang": "ja",
+  "icons": [
+    { "src": "kakeibo-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
