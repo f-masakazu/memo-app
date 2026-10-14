@@ -470,6 +470,12 @@
     padding: 12px;
     font-size: 15px;
   }
+  .lock-bio-btn {
+    width: 100%;
+    margin-top: 10px;
+    padding: 12px;
+    font-size: 15px;
+  }
 </style>
 </head>
 <body>
@@ -481,6 +487,7 @@
     <input id="lockConfirmInput" type="text" inputmode="numeric" class="modal-input lock-input hidden" placeholder="もう一度入力" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" name="memoAppLockField2" />
     <p id="lockError" class="restore-error hidden"></p>
     <button id="lockSubmitBtn" class="modal-btn-primary lock-submit-btn">OK</button>
+    <button id="lockBioBtn" class="modal-btn-secondary lock-bio-btn hidden">👆 指紋で解除</button>
   </div>
 </div>
 
@@ -538,6 +545,8 @@
     </div>
     <div class="settings-actions">
       <button id="changePinBtn" class="modal-btn-secondary">PINコードを変更</button>
+      <button id="bioOnBtn" class="modal-btn-secondary hidden">👆 指紋でも解除できるようにする</button>
+      <button id="bioOffBtn" class="modal-btn-secondary hidden">指紋での解除をやめる</button>
     </div>
     <div class="modal-actions">
       <button id="settingsCloseBtn" class="modal-btn-secondary">閉じる</button>
@@ -1489,7 +1498,11 @@
   const lockConfirmInput = document.getElementById('lockConfirmInput');
   const lockError = document.getElementById('lockError');
   const lockSubmitBtn = document.getElementById('lockSubmitBtn');
+  const lockBioBtn = document.getElementById('lockBioBtn');
+  const bioOnBtn = document.getElementById('bioOnBtn');
+  const bioOffBtn = document.getElementById('bioOffBtn');
   const PIN_HASH_KEY = 'memoAppPinHash_v1';
+  const BIO_CRED_KEY = 'memoAppBioCred_v1';
 
   async function sha256Hex(text) {
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
@@ -1498,6 +1511,72 @@
 
   function isPinConfigured() {
     return !!localStorage.getItem(PIN_HASH_KEY);
+  }
+
+  // ---------- 指紋で解除(端末の指紋・画面ロックで本人確認する) ----------
+  const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const unb64 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
+  const randomBytes = (n) => crypto.getRandomValues(new Uint8Array(n));
+  let bioSupported = false;
+  let bioInProgress = false;
+
+  function isBioConfigured() {
+    return !!localStorage.getItem(BIO_CRED_KEY);
+  }
+
+  async function checkBioSupported() {
+    try {
+      bioSupported = !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable());
+    } catch (e) {
+      bioSupported = false;
+    }
+    updateBioSettingsUI();
+  }
+
+  function updateBioSettingsUI() {
+    bioOnBtn.classList.toggle('hidden', !bioSupported || isBioConfigured());
+    bioOffBtn.classList.toggle('hidden', !isBioConfigured());
+  }
+
+  async function bioRegister() {
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: randomBytes(32),
+      rp: { name: 'メモ帳' },
+      user: { id: randomBytes(16), name: 'メモ帳', displayName: 'メモ帳' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
+      timeout: 60000
+    } });
+    localStorage.setItem(BIO_CRED_KEY, b64(cred.rawId));
+  }
+
+  async function bioVerify() {
+    const res = await navigator.credentials.get({ publicKey: {
+      challenge: randomBytes(32),
+      allowCredentials: [{ type: 'public-key', id: unb64(localStorage.getItem(BIO_CRED_KEY)) }],
+      userVerification: 'required',
+      timeout: 60000
+    } });
+    // authenticatorData の UV フラグ(本人確認済み)を確かめる
+    const flags = new Uint8Array(res.response.authenticatorData)[32];
+    return !!(flags & 0x04);
+  }
+
+  async function tryBioUnlock() {
+    if (bioInProgress || !isPinConfigured() || !isBioConfigured() || lockView.classList.contains('hidden')) return;
+    bioInProgress = true;
+    try {
+      if (await bioVerify()) {
+        hideLockScreen();
+      } else {
+        lockError.textContent = '指紋を確認できませんでした';
+        lockError.classList.remove('hidden');
+      }
+    } catch (e) {
+      // キャンセルされた場合などは、そのままPIN入力を続けてもらう
+    } finally {
+      bioInProgress = false;
+    }
   }
 
   function showLockScreen() {
@@ -1512,7 +1591,14 @@
       lockMessage.textContent = 'はじめに使うPINコードを設定してください(4桁以上の数字)';
       lockConfirmInput.classList.remove('hidden');
     }
-    setTimeout(() => lockInput.focus(), 50);
+    const useBio = isPinConfigured() && isBioConfigured();
+    lockBioBtn.classList.toggle('hidden', !useBio);
+    if (useBio) {
+      // 画面に出ているときだけ指紋の確認を出す(閉じる途中のpagehideでは出さない)
+      if (document.visibilityState === 'visible') setTimeout(tryBioUnlock, 300);
+    } else {
+      setTimeout(() => lockInput.focus(), 50);
+    }
   }
 
   function hideLockScreen() {
@@ -1560,6 +1646,24 @@
     if (e.key === 'Enter') handleLockSubmit();
   });
 
+  lockBioBtn.addEventListener('click', tryBioUnlock);
+
+  bioOnBtn.addEventListener('click', async () => {
+    try {
+      await bioRegister();
+      updateBioSettingsUI();
+      alert('指紋で解除できるようになりました');
+    } catch (e) {
+      alert('指紋の登録ができませんでした');
+    }
+  });
+
+  bioOffBtn.addEventListener('click', () => {
+    localStorage.removeItem(BIO_CRED_KEY);
+    updateBioSettingsUI();
+    alert('指紋での解除をやめました');
+  });
+
   changePinBtn.addEventListener('click', () => {
     settingsOverlay.classList.add('hidden');
     localStorage.removeItem(PIN_HASH_KEY);
@@ -1569,6 +1673,8 @@
   // ページを完全に離れる(閉じる/別サイトへ移動する)時だけロックする。
   // タブの切り替えや最小化だけでは維持する(頻繁なPIN再入力を避けるため)。
   window.addEventListener('pagehide', () => { showLockScreen(); });
+  // 戻るボタン等でキャッシュから復帰したときは、ロック画面のまま指紋の確認を出す
+  window.addEventListener('pageshow', (e) => { if (e.persisted) tryBioUnlock(); });
   window.lockApp = showLockScreen; // Android側のonPauseからも呼べるように公開(裏に回った瞬間にロック)
 
   // ---------- Android実機の戻るボタン対応 ----------
@@ -1587,6 +1693,7 @@
   render();
   updateSyncStatusUI();
   initDriveSync();
+  checkBioSupported();
   showLockScreen();
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
