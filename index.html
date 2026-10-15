@@ -680,6 +680,8 @@
   const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
   const DRIVE_FILE_NAME = 'memo_data.json';
   const DRIVE_FILE_ID_KEY = 'memoAppDriveFileId_v1';
+  const GOOGLE_LINKED_KEY = 'memoAppGoogleLinked_v1'; // 一度サインインしたことがあるか
+  const GOOGLE_HINT_KEY = 'memoAppGoogleHint_v1'; // サインインしたGoogleアカウント(次回の自動選択用)
 
   let syncState = 'signed_out'; // 'signed_out' | 'idle' | 'syncing' | 'error'
   let accessToken = null;
@@ -688,6 +690,7 @@
   let driveSyncTimer = null;
   let gisTokenClient = null;
   let lastSyncedAt = null;
+  let autoSignInArmed = false;
 
   function isAndroidBridge() {
     return !!(window.AndroidBridge && typeof window.AndroidBridge.isAndroidApp === 'function' && window.AndroidBridge.isAndroidApp());
@@ -701,7 +704,7 @@
   function updateSyncStatusUI() {
     if (!syncStatusText) return;
     let text = '';
-    if (syncState === 'signed_out') text = 'Googleと未連携です';
+    if (syncState === 'signed_out') text = autoSignInArmed ? '画面に触れると同期を再開します' : 'Googleと未連携です';
     else if (syncState === 'syncing') text = '同期中…';
     else if (syncState === 'error') text = navigator.onLine ? '同期エラーが発生しました' : 'オフライン - オンライン復帰時に自動で同期します';
     else if (syncState === 'idle') text = lastSyncedAt ? `最終同期: ${formatDate(lastSyncedAt)}` : '同期の準備ができています';
@@ -735,20 +738,60 @@
         gisTokenClient = google.accounts.oauth2.initTokenClient({
           client_id: GOOGLE_CLIENT_ID,
           scope: DRIVE_SCOPE,
-          callback: (resp) => {
-            if (resp && resp.access_token) {
-              accessToken = resp.access_token;
-              setSyncState('idle');
-              loadFromDriveOnStartup();
-            } else {
-              setSyncState('signed_out');
-            }
-          }
+          callback: handleGisToken,
+          error_callback: () => { setSyncState('signed_out'); }
         });
-        // 既にブラウザにGoogleセッションがあれば無音でサインインを試みる
-        gisTokenClient.requestAccessToken({ prompt: '' });
+        // 起動直後に自分でサインイン画面を開くとChromeにポップアップとしてブロックされるため、
+        // 以前サインインしたことがあれば、ロック解除後に画面に触れたタイミングでサインインし直す
+        if (localStorage.getItem(GOOGLE_LINKED_KEY) || driveFileId) armAutoSignIn();
       });
     }
+  }
+
+  function handleGisToken(resp) {
+    if (resp && resp.access_token) {
+      accessToken = resp.access_token;
+      localStorage.setItem(GOOGLE_LINKED_KEY, '1');
+      disarmAutoSignIn();
+      setSyncState('idle');
+      loadFromDriveOnStartup();
+      rememberGoogleAccount();
+    } else {
+      setSyncState('signed_out');
+    }
+  }
+
+  // 次回、アカウント選択画面を出さずに同じアカウントでサインインできるよう覚えておく
+  async function rememberGoogleAccount() {
+    try {
+      const res = await driveApiFetch('/drive/v3/about?fields=user(emailAddress)');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.user && data.user.emailAddress) localStorage.setItem(GOOGLE_HINT_KEY, data.user.emailAddress);
+    } catch (e) { /* 覚えられなくても同期には影響しない */ }
+  }
+
+  function onTapForAutoSignIn(e) {
+    if (!lockView.classList.contains('hidden')) return; // ロック中はPIN・指紋の操作を優先する
+    if (e.target === signInBtn) { disarmAutoSignIn(); return; } // サインインボタン自体の処理に任せる
+    disarmAutoSignIn();
+    if (!gisTokenClient || accessToken) return;
+    const hint = localStorage.getItem(GOOGLE_HINT_KEY);
+    gisTokenClient.requestAccessToken(hint ? { prompt: '', hint } : { prompt: '' });
+  }
+
+  function armAutoSignIn() {
+    if (autoSignInArmed) return;
+    autoSignInArmed = true;
+    document.addEventListener('click', onTapForAutoSignIn, true);
+    updateSyncStatusUI();
+  }
+
+  function disarmAutoSignIn() {
+    if (!autoSignInArmed) return;
+    autoSignInArmed = false;
+    document.removeEventListener('click', onTapForAutoSignIn, true);
+    updateSyncStatusUI();
   }
 
   function signIn() {
@@ -765,6 +808,9 @@
     accessToken = null;
     driveFileId = null;
     localStorage.removeItem(DRIVE_FILE_ID_KEY);
+    localStorage.removeItem(GOOGLE_LINKED_KEY);
+    localStorage.removeItem(GOOGLE_HINT_KEY);
+    disarmAutoSignIn();
     setSyncState('signed_out');
     if (isAndroidBridge()) {
       window.AndroidBridge.signOut();
@@ -780,11 +826,11 @@
         window.onAndroidAuthFailed = function () { resolve(false); };
         window.AndroidBridge.requestToken();
       } else if (gisTokenClient) {
-        gisTokenClient.callback = (resp) => {
-          if (resp && resp.access_token) { accessToken = resp.access_token; resolve(true); }
-          else resolve(false);
-        };
-        gisTokenClient.requestAccessToken({ prompt: '' });
+        // 期限切れ。ここで自分からサインイン画面を開くとポップアップとしてブロックされるので、
+        // 次に画面に触れたときにサインインし直す(取り直したらDriveとの同期も再開される)
+        accessToken = null;
+        armAutoSignIn();
+        resolve(false);
       } else {
         resolve(false);
       }
